@@ -1,0 +1,3 @@
+# Dedicated Vault Repository and On-Demand Crystallization
+
+We store knowledge graph nodes in a dedicated Git repository (`akashic/<app-entrypoint>`) rather than inside application source trees or an all-inclusive ticket mirror. External systems (MotoJira, Gerrit, Confluence) remain authoritative systems of record and are queried dynamically during investigations; only verified findings, causal links, and supporting artifacts crystallize on-demand into immutable Akashic `Incident` and `Evidence` nodes. This avoids graph noise, sync latency, and the maintenance burden of an issue ledger while ensuring graph integrity via `akashic lint`.

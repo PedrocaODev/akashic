@@ -1,0 +1,11 @@
+[package]
+name = "rca-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rca-conductor = { workspace = true }

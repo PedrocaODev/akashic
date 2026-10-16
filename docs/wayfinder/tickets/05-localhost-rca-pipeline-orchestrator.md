@@ -5,7 +5,7 @@ label: "wayfinder:grilling"
 type: "grilling"
 mode: "HITL"
 parent: "wayfinder-map"
-blocked_by: ["03-cargo-workspace-monorepo-layout"]
+blocked_by: []
 assignee: "pedrogoncalves"
 status: open
 ---

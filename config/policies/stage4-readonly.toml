@@ -1,0 +1,40 @@
+# config/policies/stage4-readonly.toml
+
+# 1. Default deny all shell/write/edit built-in tools and unknown MCP tools (effective priority 4.500 > 4.100)
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 500
+deny_message = "Stage 4 RCA reasoning is strictly read-only. Mutation tools and arbitrary shell commands are forbidden."
+
+# 2. Allow safe built-in read-only file/search tools (effective priority 4.700)
+[[rule]]
+toolName = ["read_file", "glob", "grep_search", "list_directory"]
+decision = "allow"
+priority = 700
+
+# 3. Allow read-only MCP tools on akashic, alexandria, motojira-mcp, and gerrit-mcp (effective priority 4.800)
+[[rule]]
+mcpName = ["akashic", "alexandria", "motojira-mcp", "gerrit-mcp"]
+toolName = "*"
+decision = "allow"
+priority = 800
+
+# 4. Explicitly block any mutating MCP tools even on allowed MCP servers (effective priority 4.950)
+[[rule]]
+mcpName = ["akashic", "alexandria", "motojira-mcp", "gerrit-mcp"]
+toolName = [
+  "create_issue",
+  "update_issue",
+  "add_comment",
+  "transition_issue",
+  "gerrit_review",
+  "gerrit_submit",
+  "gerrit_abandon",
+  "crystallize",
+  "write_node",
+  "delete_node"
+]
+decision = "deny"
+priority = 950
+deny_message = "Stage 4 cannot mutate Jira, Gerrit, or the Akashic Vault; Stage 5 Crystallizer owns all writes."

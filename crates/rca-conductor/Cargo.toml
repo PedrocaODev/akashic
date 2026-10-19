@@ -9,3 +9,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
+rca-sanitizer = { workspace = true }
+rca-symbolicator = { workspace = true }
+rca-crystallizer = { workspace = true }
+alexandria-core = { workspace = true }

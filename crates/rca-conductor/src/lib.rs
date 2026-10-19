@@ -1,17 +1,52 @@
+pub mod db;
+pub mod pipeline;
+pub mod stage4;
+
+pub use db::*;
+pub use pipeline::*;
+pub use stage4::*;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ConductorError {
-    #[error("Session error: {0}")]
-    Session(String),
+    #[error("Database error: {0}")]
+    Database(#[from] rusqlite::Error),
+
+    #[error("Crystallizer error: {0}")]
+    Crystallizer(#[from] rca_crystallizer::CrystallizerError),
+
+    #[error("Symbolicator error: {0}")]
+    Symbolicator(#[from] rca_symbolicator::SymbolicatorError),
+
+    #[error("Sanitizer error: {0}")]
+    Sanitizer(#[from] rca_sanitizer::SanitizerError),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-    #[error("Invalid state transition: from {from:?} to {to:?}")]
-    InvalidStateTransition {
-        from: RunStatus,
-        to: RunStatus,
-    },
+
+    #[error("Alexandria store error: {0}")]
+    AlexandriaStore(#[from] alexandria_core::store::StoreError),
+
+    #[error("Session error: {0}")]
+    Session(String),
+
+    #[error("Stage execution error: {0}")]
+    StageFailed(String),
+
+    #[error("Stage 4 execution failed: {0}")]
+    Stage4Failed(String),
+
+    #[error("Vault validation failed: {0} errors, {1} warnings")]
+    VaultValidationFailed(usize, usize),
+
+    #[error("Invalid state transition: from {from} to {to}")]
+    InvalidStateTransition { from: String, to: String },
+
     #[error("Pipeline execution failed: {0}")]
     ExecutionFailed(String),
 }

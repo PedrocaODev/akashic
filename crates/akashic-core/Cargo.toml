@@ -1,0 +1,29 @@
+[package]
+name = "akashic-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "akashic"
+path = "src/main.rs"
+
+[dependencies]
+akashic-sanitize = { workspace = true }
+akashic-embedding = { workspace = true }
+akashic-vault = { workspace = true }
+akashic-lint = { workspace = true }
+akashic-engine = { workspace = true }
+akashic-rca = { workspace = true }
+akashic-daemon = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+rmcp = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

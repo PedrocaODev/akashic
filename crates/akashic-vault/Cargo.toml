@@ -1,0 +1,21 @@
+[package]
+name = "akashic-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+akashic-sanitize = { workspace = true }
+akashic-embedding = { workspace = true }
+chrono = { workspace = true }
+difflib = { workspace = true }
+fs2 = { workspace = true }
+petgraph = { workspace = true }
+pulldown-cmark = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }

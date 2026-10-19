@@ -1,0 +1,11 @@
+[package]
+name = "akashic-sanitize"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

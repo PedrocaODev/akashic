@@ -1,3 +1,26 @@
+pub mod pipeline;
+pub mod stage4;
+pub mod store;
+pub mod symbol_cache;
+pub mod symbolicator;
+
+pub use pipeline::{ConductorPipeline, GerritEvent, Pipeline, PipelineContext, PipelineInput};
+pub use stage4::{
+    CliSubprocessRunner, GeminiCliStage4Runner, HeadlessGeminiExecutor, HypothesisCandidate,
+    MockStage4Executor, MockStage4Runner, Stage4Executor, Stage4Input, Stage4Output,
+    Stage4Request, Stage4Runner,
+};
+pub use store::{
+    CheckpointRecord, DaemonWatermarkRecord, IncidentClRecord, RcaStateStore, SessionRecord,
+    StateStore, StormGateOutcome, StormSignatureRecord, WorkflowRunRecord,
+};
+pub use symbol_cache::SymbolCache;
+pub use symbolicator::{
+    compute_crash_signature, parse_stack_trace, symbolicate_crash, symbolicate_with_cache,
+    CodeGraphStore, EngineSymbolResolver, FrameKind, InMemorySymbolResolver, ResolvedRepoTarget,
+    StackFrame, SymbolResolver, SymbolicationResult,
+};
+
 use akashic_engine::EngineConfig;
 use akashic_lint::LintConfig;
 use akashic_sanitize::CodeProfile;
@@ -11,6 +34,24 @@ pub enum RcaError {
     Database(#[from] rusqlite::Error),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("Vault error: {0}")]
+    Vault(#[from] akashic_vault::VaultError),
+    #[error("Vault lint failed with {0} errors: {1:?}")]
+    VaultLintFailed(usize, Vec<akashic_lint::LintIssue>),
+    #[error("Symbolication error: {0}")]
+    Symbolication(String),
+    #[error("Stage4 failed: {0}")]
+    Stage4Failed(String),
+    #[error("Stage failed: {0}")]
+    StageFailed(String),
+    #[error("Session error: {0}")]
+    Session(String),
+    #[error("Sanitization error: {0}")]
+    Sanitization(String),
+    #[error("Daemon error: {0}")]
+    Daemon(String),
     #[error("Execution error: {0}")]
     Execution(String),
 }

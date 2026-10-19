@@ -1220,6 +1220,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rca-conductor",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -1228,9 +1229,15 @@ dependencies = [
 name = "rca-conductor"
 version = "0.1.0"
 dependencies = [
+ "alexandria-core",
+ "rca-crystallizer",
+ "rca-sanitizer",
+ "rca-symbolicator",
+ "rusqlite",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 

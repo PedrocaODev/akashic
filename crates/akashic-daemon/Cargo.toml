@@ -8,6 +8,11 @@ license.workspace = true
 akashic-engine = { workspace = true }
 akashic-rca = { workspace = true }
 akashic-vault = { workspace = true }
+akashic-sanitize = { workspace = true }
+akashic-embedding = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+fastrand = { workspace = true }
 futures-util = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
@@ -17,3 +22,6 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

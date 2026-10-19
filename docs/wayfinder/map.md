@@ -26,11 +26,12 @@ Deliver an end-to-end, local-host deployable OEM Android Knowledge & Root Cause 
 - [Gemini CLI Headless Invocation and Local-Host Conductor Integration Contract](tickets/02-gemini-cli-headless-contract.md): Invoke `gemini` v0.64.0 via `tokio::process::Command` with `stdin` payload + `-p` directive, `--output-format json --approval-mode default --skip-trust -e none --allowed-mcp-server-names ... --policy stage4-readonly.toml`, and env `GEMINI_CLI_TRUST_WORKSPACE=true`, `GEMINI_CLI_NO_RELAUNCH=true`, `NO_BROWSER=true`; parse `stdout` on exit `0` and `stderr` on fatal exit codes.
 - [Cargo Workspace Monorepo and Path Crate Dependency Architecture](tickets/03-cargo-workspace-monorepo-layout.md): Scaffolded root `Cargo.toml` (edition 2024, resolver 2) managing 5 member crates (`rca-conductor`, `rca-sanitizer`, `rca-symbolicator`, `rca-crystallizer`, `rca-cli`) wired via path dependencies to `akashic-records`, `alexandria-core`, and `alexandria-daemon`.
 - [Alexandria Daemon RCA Extensions: Vault Loop Filter, 5-Min Debounce, and Package Registry](tickets/04-alexandria-rca-daemon-extensions.md): Integrated Gerrit self-trigger loop drop filter (`akashic/*`), 5-min sliding debounce with 3-stage AST filter, and SQLite package-to-repository autodiscovery index into `alexandria-daemon` and `alexandria-core`.
+- [Local-Host Conductor 6-Stage Pipeline and SQLite Durable State Machine](tickets/05-localhost-rca-pipeline-orchestrator.md): Implemented 6-stage RCA pipeline, SQLite WAL durable state machine, format-preserving sanitizer, stack symbolicator, Akashic crystallizer with forward-only lint gate, and rca-cli subcommands (`start`, `resume`, `status`, `list`).
 
 ## Frontier (Unblocked)
 
-- [Local-Host Conductor 6-Stage Pipeline and SQLite Durable State Machine](tickets/05-localhost-rca-pipeline-orchestrator.md) (`open`, `grilling`, `HITL`)
+- [End-to-End 4-Project PoC Deployment and Seam Verification](tickets/06-four-project-poc-deployment.md) (`open`, `task`, `HITL`)
 
 ## Blocked
 
-- [End-to-End 4-Project PoC Deployment and Seam Verification](tickets/06-four-project-poc-deployment.md) (`open`, `task`, `HITL`) — blocked by [Local-Host Conductor 6-Stage Pipeline and SQLite Durable State Machine](tickets/05-localhost-rca-pipeline-orchestrator.md)
+*(None)*

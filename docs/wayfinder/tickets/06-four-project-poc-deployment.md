@@ -5,7 +5,7 @@ label: "wayfinder:task"
 type: "task"
 mode: "HITL"
 parent: "wayfinder-map"
-blocked_by: ["03-cargo-workspace-monorepo-layout", "04-alexandria-rca-daemon-extensions", "05-localhost-rca-pipeline-orchestrator"]
+blocked_by: []
 assignee: "pedrogoncalves"
 status: open
 ---

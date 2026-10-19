@@ -1,3 +1,0 @@
-# Gerrit Event-Driven Synchronization and Non-Destructive Supersession
-
-Every merged Gerrit change emits a signal (via Gerrit event or webhook) to update the primary knowledge graph in the Akashic Vault (`akashic/<app_id>`). When a commit is subsequently reverted, the original knowledge nodes are never deleted or discarded; instead, the revert event produces an authoritative successor node that asserts supersession over the prior node, setting its status to superseded. This preserves full historical auditability, enabling `akashic query --mode lineage` and `--mode historical` to trace the full evolution of regressions and fixes.

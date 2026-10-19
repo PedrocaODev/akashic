@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rca-conductor",
-    "crates/rca-sanitizer",
-    "crates/rca-symbolicator",
-    "crates/rca-crystallizer",
-    "crates/rca-cli",
     "crates/akashic-sanitize",
     "crates/akashic-embedding",
     "crates/akashic-vault",
@@ -22,14 +17,6 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-akashic = { path = "/home/pedrogoncalves/projects/akashic-records" }
-alexandria-core = { path = "/home/pedrogoncalves/projects/alexandria/crates/alexandria-core" }
-alexandria-daemon = { path = "/home/pedrogoncalves/projects/alexandria/crates/alexandria-daemon" }
-rca-conductor = { path = "crates/rca-conductor" }
-rca-sanitizer = { path = "crates/rca-sanitizer" }
-rca-symbolicator = { path = "crates/rca-symbolicator" }
-rca-crystallizer = { path = "crates/rca-crystallizer" }
-
 akashic-sanitize = { path = "crates/akashic-sanitize" }
 akashic-embedding = { path = "crates/akashic-embedding" }
 akashic-vault = { path = "crates/akashic-vault" }

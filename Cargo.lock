@@ -24,26 +24,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akashic"
-version = "0.2.0"
-dependencies = [
- "chrono",
- "clap",
- "difflib",
- "fs2",
- "petgraph",
- "pulldown-cmark",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
- "tokio",
- "walkdir",
-]
-
-[[package]]
 name = "akashic-core"
 version = "0.1.0"
 dependencies = [
@@ -57,9 +37,12 @@ dependencies = [
  "anyhow",
  "clap",
  "rmcp",
+ "rusqlite",
  "schemars",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml",
@@ -71,13 +54,19 @@ dependencies = [
 name = "akashic-daemon"
 version = "0.1.0"
 dependencies = [
+ "akashic-embedding",
  "akashic-engine",
  "akashic-rca",
+ "akashic-sanitize",
  "akashic-vault",
+ "anyhow",
+ "chrono",
+ "fastrand",
  "futures-util",
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -180,26 +169,6 @@ dependencies = [
  "sha2",
  "thiserror",
  "walkdir",
-]
-
-[[package]]
-name = "alexandria-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "brokk-tree-sitter-kotlin",
- "regex",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "streaming-iterator",
- "thiserror",
- "tokio",
- "tracing",
- "tree-sitter",
- "tree-sitter-java",
 ]
 
 [[package]]
@@ -1376,65 +1345,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rca-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "rca-conductor",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "rca-conductor"
-version = "0.1.0"
-dependencies = [
- "alexandria-core",
- "rca-crystallizer",
- "rca-sanitizer",
- "rca-symbolicator",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "rca-crystallizer"
-version = "0.1.0"
-dependencies = [
- "akashic",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
-]
-
-[[package]]
-name = "rca-sanitizer"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "rca-symbolicator"
-version = "0.1.0"
-dependencies = [
- "alexandria-core",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
-]
 
 [[package]]
 name = "redox_syscall"

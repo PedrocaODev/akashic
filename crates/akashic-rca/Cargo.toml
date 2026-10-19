@@ -1,0 +1,20 @@
+[package]
+name = "akashic-rca"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+akashic-vault = { workspace = true }
+akashic-lint = { workspace = true }
+akashic-engine = { workspace = true }
+akashic-sanitize = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

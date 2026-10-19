@@ -1,0 +1,14 @@
+[package]
+name = "akashic-lint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+akashic-vault = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+walkdir = { workspace = true }

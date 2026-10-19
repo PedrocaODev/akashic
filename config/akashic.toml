@@ -1,0 +1,61 @@
+# Unified Akashic Platform Configuration
+
+[vault]
+path = "vault"
+db_path = ".akashic/vault_index.db"
+okf_version = "0.2"
+
+[lint]
+enabled_rules = [
+    "L001",
+    "L002",
+    "L003",
+    "L004",
+    "L005",
+    "L006",
+    "L007",
+    "L008",
+    "L009",
+    "L010",
+    "L011",
+]
+strict_forward_only = true
+
+[lint.custom_fields]
+# Optional project-specific frontmatter validation rules (key = regex pattern)
+
+[embedding]
+enabled = false
+endpoint = "http://127.0.0.1:8080/v1/embeddings"
+model = "nomic-embed-text-v1.5"
+dimensions = 768
+batch_size = 32
+timeout_ms = 5000
+
+[engine]
+db_path = ".akashic/code_graph.db"
+languages = ["java", "kotlin", "cpp", "rust", "python", "go", "typescript"]
+inferred_similarity_threshold = 0.82
+god_node_degree_threshold = 25
+rrf_k = 60
+
+[rca]
+db_path = ".akashic/rca_state.db"
+symbol_store_path = ".akashic/symbols"
+symbol_cache_max_mb = 2048
+agent_cli = "gemini"
+soak_dedup_enabled = true
+
+[daemon]
+db_path = ".akashic/rca_state.db"
+gerrit_host = "gerrit.mot.com"
+gerrit_port = 29418
+debounce_quiet_secs = 30
+debounce_max_cap_secs = 300
+loop_drop_prefix = "akashic/"
+auto_discovery_enabled = true
+
+[sanitize]
+code_profile_enabled = true
+log_profile_enabled = true
+preserve_column_alignment = true

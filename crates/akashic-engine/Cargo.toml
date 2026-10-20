@@ -22,3 +22,5 @@ tree-sitter = { workspace = true }
 tree-sitter-java = { workspace = true }
 tree-sitter-kotlin = { workspace = true }
 walkdir = { workspace = true }
+sqlite-vec = { workspace = true }
+zerocopy = { workspace = true }

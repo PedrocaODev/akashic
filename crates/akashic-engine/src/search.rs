@@ -2,6 +2,14 @@ use anyhow::Result;
 use akashic_embedding::EmbeddingProvider;
 use crate::store::{GraphStore, CodeSymbol, ConfidenceTier, CodeEdge};
 
+pub fn canonical_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -25,79 +33,65 @@ pub fn compute_embeddings_and_inferred_edges<E: EmbeddingProvider>(
     }
     
     let symbols = store.get_symbols_by_repo(repo_name)?;
-    let mut texts = Vec::new();
-    let mut ids = Vec::new();
-    
-    for sym in &symbols {
-        texts.push(format!("{} {}", sym.signature, sym.doc_comment));
-        ids.push(sym.id.clone());
-    }
-    
-    if texts.is_empty() {
+    if symbols.is_empty() {
         return Ok(0);
     }
-    
-    let vectors = embedding.embed_batch(&texts).map_err(|e| anyhow::anyhow!("Embed error: {:?}", e))?;
-    
-    for (id, vec) in ids.iter().zip(vectors.iter()) {
-        store.upsert_embedding(id, repo_name, &serde_json::to_string(vec)?)?;
-    }
-    
-    let edges = store.get_edges_by_repo(repo_name)?;
-    let mut existing_pairs = std::collections::HashSet::new();
-    for e in edges {
-        if e.confidence_tier == ConfidenceTier::Extracted {
-            existing_pairs.insert((e.source_id.clone(), e.target_id.clone()));
+
+    let mut symbol_vecs: Vec<(String, String, Vec<f32>)> = Vec::new();
+    for chunk in symbols.chunks(64) {
+        let texts: Vec<String> = chunk
+            .iter()
+            .map(|sym| format!("{} {}", sym.signature, sym.doc_comment))
+            .collect();
+        let vectors = embedding
+            .embed_batch(&texts)
+            .map_err(|e| anyhow::anyhow!("Embed error: {:?}", e))?;
+        for (sym, vec) in chunk.iter().zip(vectors.into_iter()) {
+            symbol_vecs.push((sym.id.clone(), repo_name.to_string(), vec));
         }
     }
-    
+
+    store.upsert_embeddings_batch(&symbol_vecs)?;
+
+    let existing_edges = store.list_edges(Some(repo_name))?;
+    let mut existing_pairs: std::collections::HashSet<(String, String)> = existing_edges
+        .iter()
+        .map(|e| canonical_pair(&e.source_id, &e.target_id))
+        .collect();
+
     let mut new_edges = Vec::new();
-    let mut seen_pairs = std::collections::HashSet::new();
-    
-    for i in 0..ids.len() {
-        let mut candidates = Vec::new();
-        for j in 0..ids.len() {
-            if i == j {
-                continue;
-            }
-            let sim = cosine_similarity(&vectors[i], &vectors[j]);
-            if sim >= threshold {
-                candidates.push((j, sim));
-            }
+
+    for (id_a, _, vec_a) in &symbol_vecs {
+        if vec_a.iter().all(|&x| x == 0.0) && threshold > 0.0 {
+            continue;
         }
-        
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        candidates.truncate(5);
-        
-        for (j, sim) in candidates {
-            let s_id = &ids[i];
-            let t_id = &ids[j];
-            
-            let pair1 = (s_id.clone(), t_id.clone());
-            let pair2 = (t_id.clone(), s_id.clone());
-            
-            if !existing_pairs.contains(&pair1)
-                && !existing_pairs.contains(&pair2)
-                && !seen_pairs.contains(&pair1)
-                && !seen_pairs.contains(&pair2)
-            {
-                seen_pairs.insert(pair1);
-                seen_pairs.insert(pair2);
-                new_edges.push(CodeEdge {
-                    source_id: s_id.clone(),
-                    target_id: t_id.clone(),
-                    edge_type: "SEMANTIC_SIMILARITY".to_string(),
-                    confidence_tier: ConfidenceTier::Inferred,
-                    confidence_score: sim as f64,
-                    evidence: format!("Cosine similarity: {:.3}", sim),
-                });
+        let candidates = store.search_similar_embeddings(
+            vec_a,
+            Some(repo_name),
+            symbol_vecs.len().min(4096),
+            Some((1.0 - threshold) + 1e-6),
+        )?;
+
+        for (id_b, sim) in candidates {
+            if id_a != &id_b && sim >= threshold {
+                let pair = canonical_pair(id_a, &id_b);
+                if existing_pairs.insert(pair.clone()) {
+                    new_edges.push(CodeEdge {
+                        source_id: pair.0,
+                        target_id: pair.1,
+                        edge_type: "INFERRED".to_string(),
+                        confidence_tier: ConfidenceTier::Inferred,
+                        confidence_score: (sim as f64).clamp(0.0, 1.0),
+                        evidence: format!("{{\"cosine_similarity\":{sim:.4}}}"),
+                    });
+                }
             }
         }
     }
-    
+
     let inferred_count = new_edges.len();
     store.upsert_edges_batch(&new_edges)?;
-    
+
     Ok(inferred_count)
 }
 
@@ -119,7 +113,7 @@ pub fn hybrid_search<E: EmbeddingProvider>(
     rrf_k: usize,
 ) -> Result<Vec<HybridSearchHit>> {
     let fts_results = store.fts_search(query, repo_name, limit)?;
-    
+
     if !embedding.is_available() {
         let mut hits = Vec::new();
         for (i, sym) in fts_results.into_iter().enumerate() {
@@ -133,19 +127,16 @@ pub fn hybrid_search<E: EmbeddingProvider>(
         }
         return Ok(hits);
     }
-    
-    let query_vec = embedding.embed_batch(&[query.to_string()]).map_err(|e| anyhow::anyhow!("{:?}", e))?.into_iter().next().unwrap();
-    let embeddings = store.get_embeddings(repo_name)?;
-    
-    let mut vec_scores = Vec::new();
-    for (id, vec) in embeddings {
-        let sim = cosine_similarity(&query_vec, &vec);
-        vec_scores.push((id, sim));
+
+    let mut vec_hits = Vec::new();
+    if let Ok(mut query_vecs) = embedding.embed_batch(&[query.to_string()]) {
+        if let Some(query_vec) = query_vecs.pop() {
+            vec_hits = store.search_similar_embeddings(&query_vec, repo_name, limit, None)?;
+        }
     }
-    vec_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    
+
     let mut hit_map = std::collections::HashMap::new();
-    
+
     for (i, sym) in fts_results.into_iter().enumerate() {
         hit_map.insert(sym.id.clone(), HybridSearchHit {
             symbol: sym,
@@ -155,8 +146,8 @@ pub fn hybrid_search<E: EmbeddingProvider>(
             vector_similarity: None,
         });
     }
-    
-    for (i, (id, sim)) in vec_scores.into_iter().enumerate().take(limit) {
+
+    for (i, (id, sim)) in vec_hits.into_iter().enumerate().take(limit) {
         let rrf = 1.0 / (rrf_k as f64 + i as f64 + 1.0);
         if let Some(hit) = hit_map.get_mut(&id) {
             hit.rrf_score += rrf;
@@ -172,10 +163,11 @@ pub fn hybrid_search<E: EmbeddingProvider>(
             });
         }
     }
-    
+
     let mut final_hits: Vec<_> = hit_map.into_values().collect();
     final_hits.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap_or(std::cmp::Ordering::Equal));
     final_hits.truncate(limit);
-    
+
     Ok(final_hits)
 }
+

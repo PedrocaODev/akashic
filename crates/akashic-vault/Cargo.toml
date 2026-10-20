@@ -19,3 +19,5 @@ serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 walkdir = { workspace = true }
+sqlite-vec = { workspace = true }
+zerocopy = { workspace = true }

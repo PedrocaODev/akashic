@@ -39,6 +39,7 @@ impl ConfidenceTier {
 }
 
 pub type EdgeProvenance = ConfidenceTier;
+pub type EdgeType = ConfidenceTier;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CodeSymbol {
@@ -102,12 +103,22 @@ pub struct CommunityRecord {
     pub node_count: usize,
 }
 
+fn register_sqlite_vec() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    });
+}
+
 pub struct GraphStore {
     conn: Connection,
 }
 
 impl GraphStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        register_sqlite_vec();
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -117,9 +128,40 @@ impl GraphStore {
     }
 
     pub fn open_in_memory() -> Result<Self> {
+        register_sqlite_vec();
         let conn = Connection::open_in_memory()?;
         Self::setup(&conn)?;
         Ok(Self { conn })
+    }
+
+    pub fn ensure_vec_table_dimension(&self, dim: usize) -> Result<()> {
+        if dim == 0 {
+            return Ok(());
+        }
+        let expected_fragment = format!("float[{dim}]");
+        let current_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'symbol_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let needs_recreate = match current_sql {
+            Some(sql) => !sql.contains(&expected_fragment),
+            None => true,
+        };
+        if needs_recreate {
+            self.conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS symbol_vec;
+                 CREATE VIRTUAL TABLE symbol_vec USING vec0(
+                     symbol_id TEXT PRIMARY KEY,
+                     repo_name TEXT PARTITION KEY,
+                     embedding float[{dim}] distance_metric=cosine
+                 );"
+            ))?;
+        }
+        Ok(())
     }
 
     fn setup(conn: &Connection) -> Result<()> {
@@ -185,10 +227,10 @@ impl GraphStore {
                 file_path
             );
 
-            CREATE TABLE IF NOT EXISTS symbol_embeddings (
+            CREATE VIRTUAL TABLE IF NOT EXISTS symbol_vec USING vec0(
                 symbol_id TEXT PRIMARY KEY,
-                repo_name TEXT NOT NULL,
-                vector_json TEXT NOT NULL
+                repo_name TEXT PARTITION KEY,
+                embedding float[384] distance_metric=cosine
             );
 
             CREATE TABLE IF NOT EXISTS communities (
@@ -204,7 +246,6 @@ impl GraphStore {
             CREATE INDEX IF NOT EXISTS idx_code_edges_target ON code_edges(target_id);
             CREATE INDEX IF NOT EXISTS idx_code_edges_source ON code_edges(source_id);
             CREATE INDEX IF NOT EXISTS idx_code_edges_tier ON code_edges(confidence_tier);
-            CREATE INDEX IF NOT EXISTS idx_symbol_embeddings_repo ON symbol_embeddings(repo_name);
             "#
         )?;
         Ok(())
@@ -478,12 +519,14 @@ impl GraphStore {
         for id in ids {
             self.conn.execute("DELETE FROM symbol_fts WHERE id = ?1", params![id])?;
         }
+        self.conn.execute("DELETE FROM symbol_vec WHERE symbol_id IN (SELECT id FROM code_symbols WHERE repo_name = ?1 AND file_path = ?2)", params![repo_name, file_path])?;
         self.conn.execute("DELETE FROM code_symbols WHERE repo_name = ?1 AND file_path = ?2", params![repo_name, file_path])?;
         Ok(())
     }
     
     pub fn delete_symbols_by_repo(&self, repo_name: &str) -> Result<()> {
         self.conn.execute("DELETE FROM symbol_fts WHERE repo_name = ?1", params![repo_name])?;
+        self.conn.execute("DELETE FROM symbol_vec WHERE repo_name = ?1", params![repo_name])?;
         self.conn.execute("DELETE FROM code_symbols WHERE repo_name = ?1", params![repo_name])?;
         Ok(())
     }
@@ -550,6 +593,20 @@ impl GraphStore {
         Ok(res)
     }
 
+    pub fn list_edges(&self, repo_name: Option<&str>) -> Result<Vec<CodeEdge>> {
+        match repo_name {
+            Some(repo) => self.get_edges_by_repo(repo),
+            None => {
+                let mut stmt = self.conn.prepare("SELECT source_id, target_id, edge_type, confidence_tier, confidence_score, evidence FROM code_edges")?;
+                let mut res = Vec::new();
+                for e in stmt.query_map([], Self::row_to_edge)? {
+                    res.push(e?);
+                }
+                Ok(res)
+            }
+        }
+    }
+
     pub fn get_outgoing_edges(&self, symbol_id: &str) -> Result<Vec<CodeEdge>> {
         let mut stmt = self.conn.prepare("SELECT source_id, target_id, edge_type, confidence_tier, confidence_score, evidence FROM code_edges WHERE source_id = ?1")?;
         let mut res = Vec::new();
@@ -593,35 +650,134 @@ impl GraphStore {
         Ok(())
     }
 
-    pub fn upsert_embedding(&self, symbol_id: &str, repo_name: &str, vector_json: &str) -> Result<()> {
+    pub fn upsert_embedding(&self, symbol_id: &str, repo_name: &str, vector: &[f32]) -> Result<()> {
+        self.ensure_vec_table_dimension(vector.len())?;
+        let bytes = zerocopy::IntoBytes::as_bytes(vector);
+        self.conn.execute("DELETE FROM symbol_vec WHERE symbol_id = ?1", params![symbol_id])?;
         self.conn.execute(
-            "INSERT INTO symbol_embeddings (symbol_id, repo_name, vector_json) VALUES (?1, ?2, ?3)
-             ON CONFLICT(symbol_id) DO UPDATE SET repo_name=excluded.repo_name, vector_json=excluded.vector_json",
-            params![symbol_id, repo_name, vector_json],
+            "INSERT INTO symbol_vec (symbol_id, repo_name, embedding) VALUES (?1, ?2, ?3)",
+            params![symbol_id, repo_name, bytes],
         )?;
         Ok(())
     }
 
+    pub fn upsert_embeddings_batch(&self, items: &[(String, String, Vec<f32>)]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        self.ensure_vec_table_dimension(items[0].2.len())?;
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut del_stmt = tx.prepare("DELETE FROM symbol_vec WHERE symbol_id = ?1")?;
+            let mut ins_stmt = tx.prepare(
+                "INSERT INTO symbol_vec (symbol_id, repo_name, embedding) VALUES (?1, ?2, ?3)",
+            )?;
+            for (symbol_id, repo_name, vector) in items {
+                del_stmt.execute(params![symbol_id])?;
+                let bytes = zerocopy::IntoBytes::as_bytes(vector.as_slice());
+                ins_stmt.execute(params![symbol_id, repo_name, bytes])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_embeddings(&self, repo_name: Option<&str>) -> Result<Vec<(String, Vec<f32>)>> {
+        fn decode_f32_blob(blob: &[u8]) -> Vec<f32> {
+            blob.chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .collect()
+        }
+
         let mut res = Vec::new();
         if let Some(r) = repo_name {
-            let mut stmt = self.conn.prepare("SELECT symbol_id, vector_json FROM symbol_embeddings WHERE repo_name = ?1")?;
-            for row in stmt.query_map(params![r], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))? {
-                let (id, json_str) = row?;
-                if let Ok(vec) = serde_json::from_str(&json_str) {
-                    res.push((id, vec));
-                }
+            let mut stmt = self.conn.prepare("SELECT symbol_id, embedding FROM symbol_vec WHERE repo_name = ?1")?;
+            for row in stmt.query_map(params![r], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))? {
+                let (id, blob) = row?;
+                res.push((id, decode_f32_blob(&blob)));
             }
         } else {
-            let mut stmt = self.conn.prepare("SELECT symbol_id, vector_json FROM symbol_embeddings")?;
-            for row in stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))? {
-                let (id, json_str) = row?;
-                if let Ok(vec) = serde_json::from_str(&json_str) {
-                    res.push((id, vec));
-                }
+            let mut stmt = self.conn.prepare("SELECT symbol_id, embedding FROM symbol_vec")?;
+            for row in stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))? {
+                let (id, blob) = row?;
+                res.push((id, decode_f32_blob(&blob)));
             }
         }
         Ok(res)
+    }
+
+    pub fn search_similar_embeddings(
+        &self,
+        query_vec: &[f32],
+        repo_name: Option<&str>,
+        k: usize,
+        max_distance: Option<f32>,
+    ) -> Result<Vec<(String, f32)>> {
+        if query_vec.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        if query_vec.iter().all(|&x| x == 0.0) {
+            if max_distance.is_some_and(|d| d < 1.0) {
+                return Ok(Vec::new());
+            }
+        }
+        let expected_fragment = format!("float[{}]", query_vec.len());
+        let current_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'symbol_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match current_sql {
+            Some(sql) if sql.contains(&expected_fragment) => {}
+            _ => return Ok(Vec::new()),
+        }
+
+        let k = k.min(4096);
+        let query_bytes = zerocopy::IntoBytes::as_bytes(query_vec);
+        let k_i64 = k as i64;
+        let mut results = Vec::new();
+
+        if let Some(r) = repo_name {
+            let mut stmt = self.conn.prepare(
+                "SELECT symbol_id, distance FROM symbol_vec WHERE embedding MATCH ?1 AND k = ?2 AND repo_name = ?3",
+            )?;
+            let rows = stmt.query_map(params![query_bytes, k_i64, r], |row| {
+                let id: String = row.get(0)?;
+                let dist_opt: Option<f32> = row.get(1)?;
+                Ok((id, dist_opt))
+            })?;
+            for row in rows {
+                let (id, dist_opt) = row?;
+                if let Some(dist) = dist_opt {
+                    if dist.is_finite() && max_distance.map_or(true, |max_d| dist <= max_d) {
+                        let sim = 1.0 - dist;
+                        results.push((id, sim));
+                    }
+                }
+            }
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT symbol_id, distance FROM symbol_vec WHERE embedding MATCH ?1 AND k = ?2",
+            )?;
+            let rows = stmt.query_map(params![query_bytes, k_i64], |row| {
+                let id: String = row.get(0)?;
+                let dist_opt: Option<f32> = row.get(1)?;
+                Ok((id, dist_opt))
+            })?;
+            for row in rows {
+                let (id, dist_opt) = row?;
+                if let Some(dist) = dist_opt {
+                    if dist.is_finite() && max_distance.map_or(true, |max_d| dist <= max_d) {
+                        let sim = 1.0 - dist;
+                        results.push((id, sim));
+                    }
+                }
+            }
+        }
+        Ok(results)
     }
 
     pub fn upsert_community(&self, comm: &CommunityRecord) -> Result<()> {

@@ -169,7 +169,6 @@ mod tests {
     use akashic_embedding::OfflineEmbeddingProvider;
     use akashic_sanitize::CodeProfile;
     use std::fs;
-    use std::path::Path;
 
     #[test]
     fn test_engine_init() {
@@ -412,5 +411,128 @@ mod tests {
         let _ = engine.import_projection(&new_store, &temp_proj).unwrap();
         assert_eq!(new_store.get_symbols_by_repo("test").unwrap().len(), 3);
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_symbol_vec_virtual_table_and_no_legacy_table() {
+        let engine = CodeGraphEngine::new(
+            EngineConfig::default(),
+            CodeProfile::new(),
+            OfflineEmbeddingProvider::default(),
+        );
+        let store = engine.open_in_memory_store().unwrap();
+
+        // Check that symbol_vec virtual table exists
+        let table_sql: String = store
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'symbol_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_sql.contains("vec0"), "symbol_vec must use vec0 virtual table");
+        assert!(
+            table_sql.contains("float[384]"),
+            "symbol_vec default dimension must be 384"
+        );
+
+        // Verify obsolete symbol_embeddings table does not exist
+        let old_table: rusqlite::Result<String> = store.connection().query_row(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'symbol_embeddings'",
+            [],
+            |row| row.get(0),
+        );
+        assert!(
+            matches!(old_table, Err(rusqlite::Error::QueryReturnedNoRows)),
+            "symbol_embeddings table must not exist"
+        );
+    }
+
+    #[test]
+    fn test_canonical_pair_ordering_and_dedup() {
+        use crate::search::canonical_pair;
+
+        assert_eq!(
+            canonical_pair("zebra", "apple"),
+            ("apple".to_string(), "zebra".to_string())
+        );
+        assert_eq!(
+            canonical_pair("apple", "zebra"),
+            ("apple".to_string(), "zebra".to_string())
+        );
+        assert_eq!(
+            canonical_pair("same", "same"),
+            ("same".to_string(), "same".to_string())
+        );
+    }
+
+    #[test]
+    fn test_inferred_edges_no_truncation_more_than_five_edges() {
+        let engine = CodeGraphEngine::new(
+            EngineConfig::default(),
+            CodeProfile::new(),
+            TestEmbeddingProvider,
+        );
+        let store = engine.open_in_memory_store().unwrap();
+
+        // Insert 8 distinct symbols into the repository
+        for i in 1..=8 {
+            store
+                .upsert_symbol(&CodeSymbol {
+                    id: format!("node_{i}"),
+                    repo_name: "test_repo".into(),
+                    file_path: format!("file_{i}.rs"),
+                    symbol_name: format!("symbol_{i}"),
+                    kind: "func".into(),
+                    signature: format!("fn symbol_{i}()"),
+                    visibility: "pub".into(),
+                    start_line: 1,
+                    end_line: 5,
+                    doc_comment: "".into(),
+                    community_id: None,
+                    commit_sha: "rev1".into(),
+                })
+                .unwrap();
+        }
+
+        // TestEmbeddingProvider returns identical vectors for all texts,
+        // so cosine similarity between every pair will be 1.0 (>= 0.5 threshold).
+        // With 8 symbols, the number of distinct unordered pairs is 8 * 7 / 2 = 28.
+        let edge_count =
+            compute_embeddings_and_inferred_edges(&store, "test_repo", engine.embedding(), 0.5)
+                .unwrap();
+
+        assert_eq!(
+            edge_count, 28,
+            "All 28 canonical pairs must be generated without top-5 truncation"
+        );
+
+        let edges = store.get_edges_by_repo("test_repo").unwrap();
+        assert_eq!(edges.len(), 28);
+
+        // Verify every edge is an Inferred edge
+        for edge in &edges {
+            assert_eq!(edge.edge_type, "INFERRED");
+            assert_eq!(edge.confidence_tier, ConfidenceTier::Inferred);
+            // Verify source_id < target_id canonical ordering
+            assert!(
+                edge.source_id < edge.target_id,
+                "Source ID must be strictly less than Target ID in canonical pair"
+            );
+        }
+
+        // Verify that each node participates in exactly 7 edges (which is > 5, confirming no .truncate(5))
+        for i in 1..=8 {
+            let id = format!("node_{i}");
+            let incident_count = edges
+                .iter()
+                .filter(|e| e.source_id == id || e.target_id == id)
+                .count();
+            assert_eq!(
+                incident_count, 7,
+                "Node {id} must have 7 incident edges (> 5 truncation limit)"
+            );
+        }
     }
 }

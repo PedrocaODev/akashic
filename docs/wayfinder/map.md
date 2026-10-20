@@ -2,7 +2,7 @@
 id: wayfinder-map
 title: "OEM Android Knowledge & RCA Infrastructure"
 label: "wayfinder:map"
-status: in_progress
+status: completed
 ---
 
 # Wayfinder Map: OEM Android Knowledge & RCA Infrastructure
@@ -33,12 +33,11 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 
 ## Frontier (Unblocked)
 
-- [12 — Unified `akashic mcp` Server Registration and Tool Schema Cutover](tickets/12-unified-akashic-mcp-server-registration-and-schema-cutover.md) (`ready-for-agent`)
+*(None)*
 
 ## Blocked
 
-- [13 — `akashic-cli` and `graphify` Skills Clean-Slate Overhaul](tickets/13-akashic-cli-and-graphify-skills-clean-slate-overhaul.md) (`ready-for-agent`) — *Blocked by: 12*
-- [14 — Global `GEMINI.md` and Specialist Agent Rules Alignment](tickets/14-global-gemini-md-and-specialist-agent-rules-alignment.md) (`ready-for-agent`) — *Blocked by: 12, 13*
+*(None)*
 
 ## Completed
 
@@ -53,3 +52,8 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - [09 — Gerrit Stream Daemon, Debounce, and Auto-Discovery Slice](tickets/09-gerrit-stream-daemon-debounce-and-auto-discovery-slice.md) (`done`)
 - [10 — Legacy Contraction, E2E Seam, and Agent Skill MCP Overhaul](tickets/10-legacy-contraction-e2e-seam-and-agent-skill-mcp-overhaul.md) (`done`)
 - [11 — Unified `akashic` Binary Installation and Legacy Binary Retirement](tickets/11-unified-akashic-binary-installation-and-legacy-retirement.md) (`done`)
+- [12 — Unified `akashic mcp` Server Registration and Tool Schema Cutover](tickets/12-unified-akashic-mcp-server-registration-and-schema-cutover.md) (`done`)
+- [13 — `akashic-cli` and `graphify` Skills Clean-Slate Overhaul](tickets/13-akashic-cli-and-graphify-skills-clean-slate-overhaul.md) (`done`)
+- [14 — Global `GEMINI.md` and Specialist Agent Rules Alignment](tickets/14-global-gemini-md-and-specialist-agent-rules-alignment.md) (`done`)
+
+*(Note: All tickets 01–14 across Stage 1 and Stage 2 are complete.)*

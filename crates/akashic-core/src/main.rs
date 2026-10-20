@@ -8,33 +8,42 @@ use akashic_sanitize::SanitizerProfile;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+    let ctx = CliRuntimeContext::load(cli.config.as_deref().map(std::path::Path::new))?;
 
     match cli.command {
         Commands::Vault { command } => match command {
             VaultCommands::Init(args) => {
-                let path = args.path.unwrap_or_else(|| "vault".to_string());
+                let path = args.path.unwrap_or_else(|| ctx.config.vault.path.clone());
                 std::fs::create_dir_all(&path)?;
                 println!("Initialized empty vault at {}", path);
             }
             VaultCommands::Query(args) => {
-                let vault_path = PathBuf::from("vault");
+                let vault_path = ctx.resolve_vault_path(None);
                 let graph = vault::VaultGraph::from_dir(&vault_path)?;
                 let scope = vault::Scope::new();
-                let seed_id = args.note_id.unwrap_or_default();
-                let res = vault::query::query_current(&graph, &seed_id, Some(&scope))?;
+                let seed_id = args.node_id.as_deref().unwrap_or_default();
+                if !seed_id.is_empty() {
+                    if let Some(_vault_node) = graph.get_node(seed_id) {
+                        // Node confirmed to exist
+                    } else {
+                        anyhow::bail!("Vault Node '{}' not found", seed_id);
+                    }
+                }
+                let res = vault::query::query_current(&graph, seed_id, Some(&scope))?;
                 println!("{}", serde_json::to_string_pretty(&res)?);
             }
             VaultCommands::Inspect(args) => {
-                let vault_path = PathBuf::from("vault");
+                let vault_path = ctx.resolve_vault_path(None);
                 let graph = vault::VaultGraph::from_dir(&vault_path)?;
-                if let Some(doc) = graph.get_node(&args.note_id) {
-                    println!("{}", serde_yaml::to_string(&doc.frontmatter)?);
+                let node_id = args.node_id().unwrap_or_default();
+                if let Some(vault_node) = graph.get_node(node_id) {
+                    println!("{}", serde_yaml::to_string(&vault_node.frontmatter)?);
                 } else {
-                    anyhow::bail!("Note '{}' not found", args.note_id);
+                    anyhow::bail!("Vault Node '{}' not found", node_id);
                 }
             }
             VaultCommands::Plan(args) => {
-                let path = args.path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("vault"));
+                let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
                 let plan = vault::migrator::plan_vault(&path)?;
                 if let Some(out) = args.out {
                     std::fs::write(&out, serde_json::to_string_pretty(&plan)?)?;
@@ -44,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             VaultCommands::Apply(args) => {
-                let path = args.path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("vault"));
+                let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
                 if let Some(plan_file) = args.plan {
                     let plan_str = std::fs::read_to_string(&plan_file)?;
                     let plan: vault::migrator::MigrationPlan = serde_json::from_str(&plan_str)?;
@@ -57,12 +66,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             VaultCommands::Reindex(args) => {
-                let path = args.path.unwrap_or_else(|| "vault".to_string());
-                let config = vault::VaultConfig {
-                    path: path.clone(),
-                    db_path: format!("{}/.akashic/vault_index.db", path),
-                    okf_version: "0.2".to_string(),
-                };
+                let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
+                let config = ctx.resolve_vault_config(Some(&path));
                 let manager = vault::VaultManager::new(
                     config,
                     sanitize::CodeProfile::default(),
@@ -73,10 +78,12 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Commands::Lint(args) => {
-            let vault_path = args.vault.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("vault"));
+            let vault_path = args.vault.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
             let graph = vault::VaultGraph::from_dir(&vault_path)?;
-            let mut config = lint::LintConfig::default();
-            config.strict_forward_only = args.strict;
+            let mut config = ctx.config.lint.clone();
+            if args.strict {
+                config.strict_forward_only = true;
+            }
             let report = lint::lint_vault_with_config(&graph, &config);
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -88,45 +95,33 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Graph { command } => {
-            let db_path = PathBuf::from(".akashic/code_graph.db");
+            let db_path = PathBuf::from(&ctx.config.engine.db_path);
             match command {
                 GraphCommands::Index(args) => {
                     let repo_path = args.repo_path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-                    let repo_name = args.repo_name.unwrap_or_else(|| "default".to_string());
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
                     let commit = args.commit.unwrap_or_else(|| "HEAD".to_string());
                     let engine = engine::CodeGraphEngine::new(
-                        engine::EngineConfig {
-                            db_path: db_path.to_string_lossy().to_string(),
-                            languages: vec!["rust".into(), "kotlin".into(), "java".into()],
-                            inferred_similarity_threshold: 0.8,
-                            god_node_degree_threshold: 15,
-                            rrf_k: 60,
-                        },
+                        ctx.config.engine.clone(),
                         sanitize::CodeProfile::default(),
                         embedding::DeterministicHashEmbeddingProvider::default(),
                     );
                     let store = engine.open_store()?;
-                    let report = engine.index_repository(&store, &repo_path, &repo_name, &commit)?;
+                    let report = engine.index_repository(&store, &repo_path, repo_name, &commit)?;
                     println!("Indexed repository: {} symbols, {} edges", report.symbols_upserted, report.extracted_edges);
                 }
                 GraphCommands::Reconcile(args) => {
                     let repo_path = args.repo_path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-                    let repo_name = args.repo_name.unwrap_or_else(|| "default".to_string());
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
                     let old_rev = args.old_rev.unwrap_or_else(|| "HEAD~1".to_string());
                     let new_rev = args.new_rev.unwrap_or_else(|| "HEAD".to_string());
                     let engine = engine::CodeGraphEngine::new(
-                        engine::EngineConfig {
-                            db_path: db_path.to_string_lossy().to_string(),
-                            languages: vec!["rust".into(), "kotlin".into(), "java".into()],
-                            inferred_similarity_threshold: 0.8,
-                            god_node_degree_threshold: 15,
-                            rrf_k: 60,
-                        },
+                        ctx.config.engine.clone(),
                         sanitize::CodeProfile::default(),
                         embedding::DeterministicHashEmbeddingProvider::default(),
                     );
                     let store = engine.open_store()?;
-                    let report = engine.reconcile_incremental(&store, &repo_path, &repo_name, &old_rev, &new_rev)?;
+                    let report = engine.reconcile_incremental(&store, &repo_path, repo_name, &old_rev, &new_rev)?;
                     println!("Reconciled incremental: {} symbols upserted, {} symbols removed, {} edges", report.symbols_upserted, report.symbols_removed, report.extracted_edges);
                 }
                 GraphCommands::Query(args) => {
@@ -141,7 +136,8 @@ async fn main() -> anyhow::Result<()> {
                 }
                 GraphCommands::Path(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let path = engine::analytics::shortest_path(&store, args.repo_name.as_deref().unwrap_or(""), &args.source, &args.target, args.max_hops.unwrap_or(10))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let path = engine::analytics::shortest_path(&store, repo_name, &args.source, &args.target, args.max_hops.unwrap_or(10))?;
                     if let Some(steps) = path {
                         println!("Shortest path ({} steps):", steps.len());
                         for step in steps {
@@ -158,19 +154,22 @@ async fn main() -> anyhow::Result<()> {
                 }
                 GraphCommands::Communities(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let comms = store.get_communities(args.repo_name.as_deref().unwrap_or(""))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let comms = store.get_communities(repo_name)?;
                     println!("{}", serde_json::to_string_pretty(&comms)?);
                 }
                 GraphCommands::GodNodes(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let nodes = engine::analytics::god_nodes(&store, args.repo_name.as_deref().unwrap_or(""), args.top_n.unwrap_or(10))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let nodes = engine::analytics::god_nodes(&store, repo_name, args.top_n.unwrap_or(10))?;
                     for n in nodes {
                         println!("{}: in={}, out={}, total={}", n.symbol.symbol_name, n.in_degree, n.out_degree, n.total_degree);
                     }
                 }
                 GraphCommands::Surprising(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let conns = engine::analytics::surprising_connections(&store, args.repo_name.as_deref().unwrap_or(""), args.top_n.unwrap_or(10))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let conns = engine::analytics::surprising_connections(&store, repo_name, args.top_n.unwrap_or(10))?;
                     println!("Surprising connections ({}):", conns.len());
                     for conn in conns {
                         println!("  {} <-> {} (score: {:.3}, reason: {})", conn.source_symbol, conn.target_symbol, conn.surprise_score, conn.reason);
@@ -178,29 +177,26 @@ async fn main() -> anyhow::Result<()> {
                 }
                 GraphCommands::BlastRadius(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let report = engine::analytics::blast_radius(&store, args.repo_name.as_deref().unwrap_or(""), &[args.symbol_or_diff], args.max_depth.unwrap_or(3))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let report = engine::analytics::blast_radius(&store, repo_name, &[args.symbol_or_diff], args.max_depth.unwrap_or(3))?;
                     println!("Blast radius: {} upstream callers, {} downstream dependencies", report.upstream_callers.len(), report.downstream_dependencies.len());
                 }
                 GraphCommands::Report(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
-                    let rep = engine::report::generate_graph_report(&store, args.repo_name.as_deref().unwrap_or(""))?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let rep = engine::report::generate_graph_report(&store, repo_name)?;
                     println!("{}", rep);
                 }
                 GraphCommands::Wiki(args) => {
                     let store = engine::store::GraphStore::open(&db_path)?;
                     let out_dir = args.out_dir.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("wiki"));
                     let engine = engine::CodeGraphEngine::new(
-                        engine::EngineConfig {
-                            db_path: db_path.to_string_lossy().to_string(),
-                            languages: vec![],
-                            inferred_similarity_threshold: 0.8,
-                            god_node_degree_threshold: 15,
-                            rrf_k: 60,
-                        },
+                        ctx.config.engine.clone(),
                         sanitize::CodeProfile::default(),
                         embedding::DeterministicHashEmbeddingProvider::default(),
                     );
-                    let paths = engine.generate_wiki(&store, args.repo_name.as_deref().unwrap_or(""), &out_dir)?;
+                    let repo_name = ctx.resolve_repo_name(args.repo_name.as_deref());
+                    let paths = engine.generate_wiki(&store, repo_name, &out_dir)?;
                     println!("Generated {} wiki pages", paths.len());
                 }
                 GraphCommands::Discover(args) => {
@@ -211,73 +207,76 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Rca { command } => match command {
-            RcaCommands::Run(args) => {
-                let state_store = rca::store::StateStore::open(".akashic/rca_state.db")?;
-                let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
-                let raw_log = if let Some(file) = args.log_file {
-                    std::fs::read_to_string(&file)?
-                } else {
-                    args.raw_log.unwrap_or_default()
-                };
-                let input = rca::pipeline::PipelineInput {
-                    run_id: None,
-                    legacy_session_id: None,
-                    jira_key: args.jira_key.unwrap_or_else(|| "CLI-RCA".into()),
-                    app_id: args.app_id.unwrap_or_default(),
-                    device: "cli-device".into(),
-                    android_version: "14".into(),
-                    raw_logs: raw_log,
-                    vault_path: PathBuf::from("vault"),
-                    graph_store: Some(PathBuf::from(".akashic/code_graph.db")),
-                    prior_resolution_id: None,
-                    policy_path: None,
-                };
-                let ctx = pipeline.run(input).await?;
-                println!("RCA completed: run_id={}, deduplicated={}", ctx.run_id, ctx.deduplicated);
-            }
-            RcaCommands::Start(args) => {
-                println!("Starting RCA investigation for trigger: {}", args.trigger_id);
-            }
-            RcaCommands::Resume(args) => {
-                let state_store = rca::store::StateStore::open(".akashic/rca_state.db")?;
-                if let Some(run) = state_store.get_workflow_run(&args.investigation_id)? {
-                    println!("Resumed run: {:?}", run);
-                } else {
-                    anyhow::bail!("Investigation '{}' not found", args.investigation_id);
+        Commands::Rca { command } => {
+            let rca_db_path = PathBuf::from(&ctx.config.rca.db_path);
+            match command {
+                RcaCommands::Run(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+                    let raw_log = if let Some(file) = args.log_file {
+                        std::fs::read_to_string(&file)?
+                    } else {
+                        args.raw_log.unwrap_or_default()
+                    };
+                    let input = rca::pipeline::PipelineInput {
+                        run_id: None,
+                        legacy_session_id: None,
+                        jira_key: args.jira_key.unwrap_or_else(|| "CLI-RCA".into()),
+                        app_id: args.app_id.unwrap_or_default(),
+                        device: "cli-device".into(),
+                        android_version: "14".into(),
+                        raw_logs: raw_log,
+                        vault_path: ctx.resolve_vault_path(None),
+                        graph_store: Some(PathBuf::from(&ctx.config.engine.db_path)),
+                        prior_resolution_id: None,
+                        policy_path: None,
+                    };
+                    let rca_ctx = pipeline.run(input).await?;
+                    println!("RCA completed: run_id={}, deduplicated={}", rca_ctx.run_id, rca_ctx.deduplicated);
+                }
+                RcaCommands::Start(args) => {
+                    println!("Starting RCA investigation for trigger: {}", args.trigger_id);
+                }
+                RcaCommands::Resume(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    if let Some(run) = state_store.get_workflow_run(&args.investigation_id)? {
+                        println!("Resumed run: {:?}", run);
+                    } else {
+                        anyhow::bail!("Investigation '{}' not found", args.investigation_id);
+                    }
+                }
+                RcaCommands::Status(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    if let Some(run) = state_store.get_workflow_run(&args.investigation_id)? {
+                        println!("{}", serde_json::to_string_pretty(&run)?);
+                    } else {
+                        anyhow::bail!("Investigation '{}' not found", args.investigation_id);
+                    }
+                }
+                RcaCommands::Symbolicate(args) => {
+                    let raw_log = if let Some(file) = args.log_file {
+                        std::fs::read_to_string(&file)?
+                    } else {
+                        args.raw_log.unwrap_or_default()
+                    };
+                    let app_id = args.app_id.unwrap_or_default();
+                    let resolver = rca::symbolicator::InMemorySymbolResolver::with_motorola_defaults();
+                    let res = rca::symbolicate_crash(&app_id, &raw_log, &resolver)?;
+                    println!("{}", serde_json::to_string_pretty(&res)?);
+                }
+                RcaCommands::Crystallize(args) => {
+                    println!("Crystallizing run: {}", args.run_id);
+                }
+                RcaCommands::Supersede(args) => {
+                    println!("Superseding {} with {}", args.old_id, args.new_id);
+                }
+                RcaCommands::Triage => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let runs = state_store.list_workflow_runs()?;
+                    println!("Open investigations: {}", runs.len());
                 }
             }
-            RcaCommands::Status(args) => {
-                let state_store = rca::store::StateStore::open(".akashic/rca_state.db")?;
-                if let Some(run) = state_store.get_workflow_run(&args.investigation_id)? {
-                    println!("{}", serde_json::to_string_pretty(&run)?);
-                } else {
-                    anyhow::bail!("Investigation '{}' not found", args.investigation_id);
-                }
-            }
-            RcaCommands::Symbolicate(args) => {
-                let raw_log = if let Some(file) = args.log_file {
-                    std::fs::read_to_string(&file)?
-                } else {
-                    args.raw_log.unwrap_or_default()
-                };
-                let app_id = args.app_id.unwrap_or_default();
-                let resolver = rca::symbolicator::InMemorySymbolResolver::with_motorola_defaults();
-                let res = rca::symbolicate_crash(&app_id, &raw_log, &resolver)?;
-                println!("{}", serde_json::to_string_pretty(&res)?);
-            }
-            RcaCommands::Crystallize(args) => {
-                println!("Crystallizing run: {}", args.run_id);
-            }
-            RcaCommands::Supersede(args) => {
-                println!("Superseding {} with {}", args.old_id, args.new_id);
-            }
-            RcaCommands::Triage => {
-                let state_store = rca::store::StateStore::open(".akashic/rca_state.db")?;
-                let runs = state_store.list_workflow_runs()?;
-                println!("Open investigations: {}", runs.len());
-            }
-        },
+        }
         Commands::Daemon { command } => match command {
             DaemonCommands::Start | DaemonCommands::Run => {
                 println!("Daemon started");
@@ -293,7 +292,7 @@ async fn main() -> anyhow::Result<()> {
             }
             DaemonCommands::Discover(args) => {
                 let path = args.workspace.map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-                let db_path = PathBuf::from(".akashic/code_graph.db");
+                let db_path = PathBuf::from(&ctx.config.engine.db_path);
                 let store = engine::store::GraphStore::open(&db_path)?;
                 let report = daemon::discover_workspace(&path, &store)?;
                 println!("Discovered {} repositories, {} package mappings", report.discovered_repositories.len(), report.package_mappings.len());
@@ -335,7 +334,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Mcp(args) => {
-            mcp::run_mcp_server(args.vault.map(PathBuf::from), args.workspace.map(PathBuf::from)).await?;
+            mcp::run_mcp_server(args.vault.map(PathBuf::from), args.workspace.map(PathBuf::from), Some(ctx.config)).await?;
         }
     }
 

@@ -23,6 +23,7 @@ use akashic_vault::{
 pub struct AkashicMcpServer {
     pub vault_path: PathBuf,
     pub workspace_path: PathBuf,
+    pub config: Option<crate::AkashicConfig>,
 }
 
 impl AkashicMcpServer {
@@ -30,10 +31,30 @@ impl AkashicMcpServer {
         Self {
             vault_path,
             workspace_path,
+            config: None,
+        }
+    }
+
+    pub fn with_config(vault_path: PathBuf, workspace_path: PathBuf, config: crate::AkashicConfig) -> Self {
+        Self {
+            vault_path,
+            workspace_path,
+            config: Some(config),
         }
     }
 
     pub fn graph_db_path(&self) -> PathBuf {
+        if let Some(ref cfg) = self.config {
+            let p = PathBuf::from(&cfg.engine.db_path);
+            if p.is_absolute() || p.exists() {
+                return p;
+            }
+            let candidate = self.workspace_path.join(&p);
+            if candidate.exists() {
+                return candidate;
+            }
+            return p;
+        }
         let candidate = self.workspace_path.join(".akashic/code_graph.db");
         if candidate.exists() {
             candidate
@@ -45,6 +66,17 @@ impl AkashicMcpServer {
     }
 
     pub fn rca_db_path(&self) -> PathBuf {
+        if let Some(ref cfg) = self.config {
+            let p = PathBuf::from(&cfg.rca.db_path);
+            if p.is_absolute() || p.exists() {
+                return p;
+            }
+            let candidate = self.workspace_path.join(&p);
+            if candidate.exists() {
+                return candidate;
+            }
+            return p;
+        }
         let candidate = self.workspace_path.join(".akashic/rca_state.db");
         if candidate.exists() {
             candidate
@@ -120,14 +152,15 @@ pub struct VaultQueryParams {
     pub mode: String,
     #[serde(default)]
     pub scope: Option<String>,
-    #[serde(default)]
-    pub note_id: Option<String>,
+    #[serde(default, alias = "note_id")]
+    pub node_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct VaultInspectParams {
-    pub note_id: String,
+    #[serde(alias = "note_id")]
+    pub node_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -142,13 +175,15 @@ pub struct VaultLintParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct VaultReadParams {
-    pub note_id: String,
+    #[serde(alias = "note_id")]
+    pub node_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct VaultWriteCanonicalParams {
-    pub note_id: String,
+    #[serde(alias = "note_id")]
+    pub node_id: String,
     pub title: String,
     pub node_type: String,
     pub content: String,
@@ -252,7 +287,7 @@ pub struct RcaCrystallizeParams {
 #[rmcp::tool_router(server_handler)]
 impl AkashicMcpServer {
     // 1. Vault Query
-    #[tool(name = "vault_query", description = "Query vault notes by mode (current, lineage, impact, historical) and optional scope filter")]
+    #[tool(name = "vault_query", description = "Query vault nodes by mode (current, lineage, impact, historical) and optional scope filter")]
     pub async fn vault_query(&self, Parameters(params): Parameters<VaultQueryParams>) -> CallToolResult {
         if !self.vault_path.exists() {
             return tool_err(format!("Vault path '{}' does not exist", self.vault_path.display()));
@@ -263,8 +298,13 @@ impl AkashicMcpServer {
         };
 
         let scope = parse_scope(params.scope.as_deref());
-        let seed_id = match params.note_id.as_deref() {
-            Some(id) => id.to_string(),
+        let seed_id = match params.node_id.as_deref() {
+            Some(id) => {
+                if graph.get_node(id).is_none() {
+                    return tool_err(format!("Vault Node '{}' not found", id));
+                }
+                id.to_string()
+            }
             None => {
                 match graph.node_by_id.keys().next() {
                     Some(first) => first.clone(),
@@ -298,24 +338,24 @@ impl AkashicMcpServer {
             Err(e) => return tool_err(format!("Failed to load vault graph: {}", e)),
         };
 
-        match graph.get_node(&params.note_id) {
-            Some(doc) => {
-                let outgoing = graph.outgoing_edges(&params.note_id);
-                let incoming = graph.incoming_edges(&params.note_id);
+        match graph.get_node(&params.node_id) {
+            Some(vault_node) => {
+                let outgoing = graph.outgoing_edges(&params.node_id);
+                let incoming = graph.incoming_edges(&params.node_id);
                 let info = serde_json::json!({
-                    "id": doc.frontmatter.id,
-                    "title": doc.frontmatter.title,
-                    "type": doc.frontmatter.node_type,
-                    "status": doc.frontmatter.status,
-                    "scope": doc.frontmatter.scope,
-                    "tags": doc.frontmatter.tags,
-                    "relative_path": doc.relative_path,
+                    "id": vault_node.frontmatter.id,
+                    "title": vault_node.frontmatter.title,
+                    "type": vault_node.frontmatter.node_type,
+                    "status": vault_node.frontmatter.status,
+                    "scope": vault_node.frontmatter.scope,
+                    "tags": vault_node.frontmatter.tags,
+                    "relative_path": vault_node.relative_path,
                     "outgoing_edges": outgoing,
                     "incoming_edges": incoming,
                 });
                 tool_ok(&info)
             }
-            None => tool_err(format!("Note '{}' not found in vault", params.note_id)),
+            None => tool_err(format!("Vault Node '{}' not found", params.node_id)),
         }
     }
 
@@ -329,7 +369,7 @@ impl AkashicMcpServer {
         if !target.exists() {
             return tool_err(format!("Lint target path '{}' does not exist", target.display()));
         }
-        let mut config = akashic_lint::LintConfig::default();
+        let mut config = self.config.as_ref().map(|c| c.lint.clone()).unwrap_or_default();
         if let Some(strict) = params.strict {
             config.strict_forward_only = strict;
         }
@@ -349,7 +389,7 @@ impl AkashicMcpServer {
             return tool_err(format!("Vault path '{}' does not exist", self.vault_path.display()));
         }
 
-        let direct_file = self.vault_path.join(format!("{}.md", params.note_id));
+        let direct_file = self.vault_path.join(format!("{}.md", params.node_id));
         if direct_file.is_file() {
             match std::fs::read_to_string(&direct_file) {
                 Ok(content) => return tool_text(content),
@@ -358,8 +398,8 @@ impl AkashicMcpServer {
         }
 
         if let Ok(graph) = VaultGraph::from_dir(&self.vault_path) {
-            if let Some(doc) = graph.get_node(&params.note_id) {
-                let file_path = self.vault_path.join(&doc.relative_path);
+            if let Some(vault_node) = graph.get_node(&params.node_id) {
+                let file_path = self.vault_path.join(&vault_node.relative_path);
                 match std::fs::read_to_string(&file_path) {
                     Ok(content) => return tool_text(content),
                     Err(e) => return tool_err(format!("Failed to read {}: {}", file_path.display(), e)),
@@ -367,7 +407,7 @@ impl AkashicMcpServer {
             }
         }
 
-        tool_err(format!("Note '{}' not found in vault", params.note_id))
+        tool_err(format!("Vault Node '{}' not found", params.node_id))
     }
 
     // 5. Vault Write Canonical
@@ -390,7 +430,7 @@ impl AkashicMcpServer {
         };
 
         let mut frontmatter = Frontmatter::default();
-        frontmatter.id = params.note_id.clone();
+        frontmatter.id = params.node_id.clone();
         frontmatter.title = params.title;
         frontmatter.node_type = node_type;
         frontmatter.status = NodeStatus::Active;
@@ -401,10 +441,10 @@ impl AkashicMcpServer {
             Err(e) => return tool_err(format!("Failed to serialize document: {}", e)),
         };
 
-        let target_path = self.vault_path.join(format!("{}.md", params.note_id));
+        let target_path = self.vault_path.join(format!("{}.md", params.node_id));
         match std::fs::write(&target_path, doc_str) {
-            Ok(_) => tool_text(format!("Wrote note '{}' to {}", params.note_id, target_path.display())),
-            Err(e) => tool_err(format!("Failed to write note: {}", e)),
+            Ok(_) => tool_text(format!("Wrote vault node '{}' to {}", params.node_id, target_path.display())),
+            Err(e) => tool_err(format!("Failed to write vault node: {}", e)),
         }
     }
 
@@ -758,11 +798,21 @@ impl AkashicMcpServer {
 pub async fn run_mcp_server(
     vault_path: Option<PathBuf>,
     workspace_path: Option<PathBuf>,
+    config: Option<crate::AkashicConfig>,
 ) -> anyhow::Result<()> {
     use rmcp::service::ServiceExt;
-    let vault_path = vault_path.unwrap_or_else(|| PathBuf::from("vault"));
+    let vault_path = vault_path.unwrap_or_else(|| {
+        config
+            .as_ref()
+            .map(|c| PathBuf::from(&c.vault.path))
+            .unwrap_or_else(|| PathBuf::from("vault"))
+    });
     let workspace_path = workspace_path.unwrap_or_else(|| PathBuf::from("."));
-    let server = AkashicMcpServer::new(vault_path, workspace_path);
+    let server = if let Some(cfg) = config {
+        AkashicMcpServer::with_config(vault_path, workspace_path, cfg)
+    } else {
+        AkashicMcpServer::new(vault_path, workspace_path)
+    };
     let running = server.serve(rmcp::transport::io::stdio()).await?;
     running.waiting().await?;
     Ok(())

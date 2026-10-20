@@ -4,10 +4,10 @@
 
 **Blocked by:** 01 — Three-Repo Merge and Eight-Crate Workspace Prefactor
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `EmbeddingProvider` trait defines async `embed_batch`, `dimension`, and `is_available` methods.
-- [ ] HTTP client connects to local OpenAI-compatible endpoints (`/v1/embeddings`), handling batching, timeouts, and error responses cleanly.
-- [ ] Process sidecar manager launches and monitors a local embedding model process (e.g. `llama.cpp` server) with active HTTP health probes and clean shutdown on SIGINT/SIGTERM.
-- [ ] Graceful fallback API reports offline status without throwing fatal errors, enabling callers to downgrade to lexical/AST operations.
-- [ ] CLI subcommands `akashic embedding status` and `akashic embedding start-sidecar` report real-time health and manage process states.
+- [x] `EmbeddingProvider` trait defines async `embed_batch`, `dimension`, and `is_available` methods.
+- [x] HTTP client connects to local OpenAI-compatible endpoints (`/v1/embeddings`), handling batching, timeouts, and error responses cleanly.
+- [x] Process sidecar manager launches and monitors a local embedding model process (e.g. `llama.cpp` server) with active HTTP health probes and clean shutdown on SIGINT/SIGTERM.
+- [x] Graceful fallback API reports offline status without throwing fatal errors, enabling callers to downgrade to lexical/AST operations.
+- [x] CLI subcommands `akashic embedding status` and `akashic embedding start-sidecar` report real-time health and manage process states.

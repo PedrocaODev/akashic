@@ -4,11 +4,11 @@
 
 **Blocked by:** 07 — Graph Communities, God Nodes, Blast Radius, and Report Slice, 08 — Host-Native RCA Conductor, Symbolication, and Crystallization Slice
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Gerrit SSH event stream watcher captures patchset-created and change-merged events with automatic reconnect on network drops.
-- [ ] Self-trigger loop drop filter ignores events originating from the `akashic/*` knowledge repository.
-- [ ] Adaptive sliding debounce groups commits within a `30s` quiet window up to a `300s` maximum cap, dispatching batched incremental indexing to `akashic-engine`.
-- [ ] Persistent watermark tracking in `.akashic/rca_state.db` triggers catch-up replay queries (`gerrit query after:<watermark>`) after disconnections or service restarts.
-- [ ] Clone-to-Onboard Discovery detects newly cloned Git repositories, extracts Android package identifiers across Gradle and Manifest files via a 5-pass extractor, and auto-provisions Code Graph and Vault partitions.
-- [ ] CLI commands `akashic daemon run` and `akashic daemon status` manage background execution and expose monitoring diagnostics.
+- [x] Gerrit SSH event stream watcher captures patchset-created and change-merged events with automatic reconnect on network drops.
+- [x] Self-trigger loop drop filter ignores events originating from the `akashic/*` knowledge repository.
+- [x] Adaptive sliding debounce groups commits within a `30s` quiet window up to a `300s` maximum cap, dispatching batched incremental indexing to `akashic-engine`.
+- [x] Persistent watermark tracking in `.akashic/rca_state.db` triggers catch-up replay queries (`gerrit query after:<watermark>`) after disconnections or service restarts.
+- [x] Clone-to-Onboard Discovery detects newly cloned Git repositories, extracts Android package identifiers across Gradle and Manifest files via a 5-pass extractor, and auto-provisions Code Graph and Vault partitions.
+- [x] CLI commands `akashic daemon run` and `akashic daemon status` manage background execution and expose monitoring diagnostics.

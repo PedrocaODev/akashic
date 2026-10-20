@@ -8,7 +8,143 @@ pub use akashic_vault as vault;
 
 pub mod mcp;
 
+use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
+use serde::{Deserialize, Serialize};
+
+pub const DEFAULT_CONFIG_PATH: &str = "config/akashic.toml";
+pub const DEFAULT_REPO_NAME: &str = "default";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SanitizeConfig {
+    pub enabled: bool,
+    pub custom_patterns: Vec<String>,
+}
+
+impl Default for SanitizeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            custom_patterns: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AkashicConfig {
+    pub default_repo: Option<String>,
+    pub vault: vault::VaultConfig,
+    pub lint: lint::LintConfig,
+    pub embedding: embedding::EmbeddingConfig,
+    pub engine: engine::EngineConfig,
+    pub rca: rca::RcaConfig,
+    pub daemon: daemon::DaemonConfig,
+    pub sanitize: SanitizeConfig,
+}
+
+fn merge_toml_tables(base: &mut toml::Table, patch: toml::Table) {
+    for (k, v) in patch {
+        match (base.get_mut(&k), v) {
+            (Some(toml::Value::Table(b_tab)), toml::Value::Table(p_tab)) => {
+                merge_toml_tables(b_tab, p_tab);
+            }
+            (_, patch_val) => {
+                base.insert(k, patch_val);
+            }
+        }
+    }
+}
+
+impl AkashicConfig {
+    pub fn from_toml_str(raw: &str) -> anyhow::Result<Self> {
+        let default_val = toml::Value::try_from(Self::default())?;
+        let mut default_tab = match default_val {
+            toml::Value::Table(t) => t,
+            _ => toml::Table::new(),
+        };
+
+        if !raw.trim().is_empty() {
+            let patch_val: toml::Value = toml::from_str(raw)?;
+            if let toml::Value::Table(patch_tab) = patch_val {
+                merge_toml_tables(&mut default_tab, patch_tab);
+            }
+        }
+
+        let merged_val = toml::Value::Table(default_tab);
+        let config: Self = merged_val.try_into()?;
+        Ok(config)
+    }
+
+    pub fn from_file(path: &Path) -> anyhow::Result<Self> {
+        let raw = std::fs::read_to_string(path)?;
+        Self::from_toml_str(&raw)
+    }
+
+    pub fn load(explicit_path: Option<&Path>) -> anyhow::Result<Self> {
+        if let Some(path) = explicit_path {
+            Self::from_file(path)
+        } else {
+            let default_path = Path::new(DEFAULT_CONFIG_PATH);
+            if default_path.exists() {
+                Self::from_file(default_path)
+            } else {
+                Ok(Self::default())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CliRuntimeContext {
+    pub config_path: PathBuf,
+    pub config: AkashicConfig,
+}
+
+impl CliRuntimeContext {
+    pub fn load(explicit_config: Option<&Path>) -> anyhow::Result<Self> {
+        let config = AkashicConfig::load(explicit_config)?;
+        let config_path = explicit_config
+            .unwrap_or_else(|| Path::new(DEFAULT_CONFIG_PATH))
+            .to_path_buf();
+        Ok(Self {
+            config_path,
+            config,
+        })
+    }
+
+    pub fn from_config(config: AkashicConfig) -> Self {
+        Self {
+            config_path: PathBuf::from(DEFAULT_CONFIG_PATH),
+            config,
+        }
+    }
+
+    pub fn resolve_vault_path(&self, cli_override: Option<&Path>) -> PathBuf {
+        cli_override
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(&self.config.vault.path))
+    }
+
+    pub fn resolve_vault_config(&self, cli_override: Option<&Path>) -> vault::VaultConfig {
+        let mut cfg = self.config.vault.clone();
+        if let Some(path) = cli_override {
+            cfg.path = path.to_string_lossy().to_string();
+        }
+        cfg
+    }
+
+    pub fn resolve_repo_name<'a>(&'a self, cli_override: Option<&'a str>) -> &'a str {
+        if let Some(r) = cli_override {
+            r
+        } else if let Some(ref r) = self.config.default_repo {
+            r.as_str()
+        } else {
+            DEFAULT_REPO_NAME
+        }
+    }
+}
 
 #[derive(Parser, Debug, PartialEq)]
 #[command(
@@ -85,13 +221,24 @@ pub struct VaultQueryArgs {
     pub mode: String,
     #[arg(long)]
     pub scope: Option<String>,
+    #[arg(long, alias = "note-id")]
+    pub node_id: Option<String>,
     #[arg(long)]
-    pub note_id: Option<String>,
+    pub query: Option<String>,
 }
 
 #[derive(Args, Debug, PartialEq, Default)]
 pub struct VaultInspectArgs {
-    pub note_id: String,
+    #[arg(long, alias = "note-id")]
+    pub node_id: Option<String>,
+    #[arg(value_name = "NODE_ID")]
+    pub positional_node_id: Option<String>,
+}
+
+impl VaultInspectArgs {
+    pub fn node_id(&self) -> Option<&str> {
+        self.node_id.as_deref().or(self.positional_node_id.as_deref())
+    }
 }
 
 #[derive(Args, Debug, PartialEq, Default)]
@@ -437,12 +584,44 @@ mod tests {
             } if args.mode == "lineage" && args.scope.as_deref() == Some("repo=demo")
         ));
 
+        let cli = Cli::try_parse_from(["akashic", "vault", "query", "--node-id", "INC-123"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Vault {
+                command: VaultCommands::Query(args)
+            } if args.node_id.as_deref() == Some("INC-123")
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "vault", "query", "--note-id", "INC-123"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Vault {
+                command: VaultCommands::Query(args)
+            } if args.node_id.as_deref() == Some("INC-123")
+        ));
+
         let cli = Cli::try_parse_from(["akashic", "vault", "inspect", "INC-123"]).unwrap();
         assert!(matches!(
             cli.command,
             Commands::Vault {
                 command: VaultCommands::Inspect(args)
-            } if args.note_id == "INC-123"
+            } if args.node_id() == Some("INC-123")
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "vault", "inspect", "--node-id", "INC-123"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Vault {
+                command: VaultCommands::Inspect(args)
+            } if args.node_id() == Some("INC-123")
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "vault", "inspect", "--note-id", "INC-123"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Vault {
+                command: VaultCommands::Inspect(args)
+            } if args.node_id() == Some("INC-123")
         ));
 
         let cli = Cli::try_parse_from(["akashic", "vault", "plan", "--out", "plan.json"]).unwrap();
@@ -468,6 +647,44 @@ mod tests {
                 command: VaultCommands::Reindex(VaultReindexArgs::default())
             }
         );
+    }
+
+    #[test]
+    fn test_config_and_context() {
+        let toml_data = r#"
+            default_repo = "custom_repo"
+
+            [vault]
+            path = "my_vault"
+            db_path = "custom/vault_index.db"
+
+            [engine]
+            db_path = "custom/code_graph.db"
+
+            [rca]
+            db_path = "custom/rca_state.db"
+        "#;
+        let config = AkashicConfig::from_toml_str(toml_data).unwrap();
+        assert_eq!(config.default_repo.as_deref(), Some("custom_repo"));
+        assert_eq!(config.vault.path, "my_vault");
+        assert_eq!(config.vault.db_path, "custom/vault_index.db");
+        assert_eq!(config.engine.db_path, "custom/code_graph.db");
+        assert_eq!(config.rca.db_path, "custom/rca_state.db");
+
+        // Defaults should be retained for omitted fields
+        assert_eq!(config.vault.okf_version, "0.2");
+        assert_eq!(config.engine.languages, vec!["java", "kotlin", "cpp", "rust", "python", "go", "typescript"]);
+        assert_eq!(config.engine.god_node_degree_threshold, 25);
+
+        let ctx = CliRuntimeContext::from_config(config);
+        assert_eq!(ctx.resolve_vault_path(None), PathBuf::from("my_vault"));
+        assert_eq!(ctx.resolve_vault_path(Some(Path::new("override_vault"))), PathBuf::from("override_vault"));
+        assert_eq!(ctx.resolve_repo_name(None), "custom_repo");
+        assert_eq!(ctx.resolve_repo_name(Some("cli_repo")), "cli_repo");
+
+        let vc = ctx.resolve_vault_config(None);
+        assert_eq!(vc.path, "my_vault");
+        assert_eq!(vc.db_path, "custom/vault_index.db");
     }
 
     #[test]

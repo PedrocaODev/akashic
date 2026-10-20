@@ -405,3 +405,149 @@ Auth header: Bearer abcdef1234567890abcdef
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_cli_runtime_context_and_vault_node_alignment() -> anyhow::Result<()> {
+    use akashic_core::{Commands, VaultCommands, CliRuntimeContext};
+    use akashic_core::mcp::{VaultInspectParams, VaultQueryParams};
+    use rmcp::handler::server::wrapper::Parameters;
+
+    // 1. Test CLI argument parsing with --config
+    let temp_vault = tempfile::tempdir()?;
+    let vault_path_str = temp_vault.path().to_str().unwrap();
+
+    let temp_cfg = tempfile::NamedTempFile::new()?;
+    fs::write(
+        temp_cfg.path(),
+        format!(
+            r#"
+        default_repo = "my-custom-repo"
+
+        [vault]
+        path = "{}"
+        db_path = "custom-vault.db"
+
+        [engine]
+        db_path = "custom-engine.db"
+
+        [rca]
+        db_path = "custom-rca.db"
+        "#,
+            vault_path_str
+        ),
+    )?;
+    let config_path_str = temp_cfg.path().to_str().unwrap();
+
+    let cli = Cli::try_parse_from(["akashic", "--config", config_path_str, "graph", "god-nodes"])?;
+    assert_eq!(cli.config.as_deref(), Some(config_path_str));
+
+    let ctx = CliRuntimeContext::load(cli.config.as_deref().map(std::path::Path::new))?;
+    assert_eq!(ctx.resolve_vault_path(None), temp_vault.path());
+    assert_eq!(ctx.resolve_repo_name(None), "my-custom-repo");
+    assert_eq!(ctx.resolve_repo_name(Some("cli-override")), "cli-override");
+    assert_eq!(ctx.config.engine.db_path, "custom-engine.db");
+    assert_eq!(ctx.config.rca.db_path, "custom-rca.db");
+
+    // 2. Test CLI --node-id and --note-id flags for vault query and inspect
+    let cli_vq1 = Cli::try_parse_from(["akashic", "vault", "query", "--node-id", "INC-101"])?;
+    if let Commands::Vault { command: VaultCommands::Query(args) } = cli_vq1.command {
+        assert_eq!(args.node_id.as_deref(), Some("INC-101"));
+    } else {
+        panic!("Expected VaultCommands::Query");
+    }
+
+    let cli_vq2 = Cli::try_parse_from(["akashic", "vault", "query", "--note-id", "INC-101"])?;
+    if let Commands::Vault { command: VaultCommands::Query(args) } = cli_vq2.command {
+        assert_eq!(args.node_id.as_deref(), Some("INC-101"));
+    } else {
+        panic!("Expected VaultCommands::Query");
+    }
+
+    let cli_vi1 = Cli::try_parse_from(["akashic", "vault", "inspect", "--node-id", "INC-101"])?;
+    if let Commands::Vault { command: VaultCommands::Inspect(args) } = cli_vi1.command {
+        assert_eq!(args.node_id(), Some("INC-101"));
+    } else {
+        panic!("Expected VaultCommands::Inspect");
+    }
+
+    let cli_vi2 = Cli::try_parse_from(["akashic", "vault", "inspect", "--note-id", "INC-101"])?;
+    if let Commands::Vault { command: VaultCommands::Inspect(args) } = cli_vi2.command {
+        assert_eq!(args.node_id(), Some("INC-101"));
+    } else {
+        panic!("Expected VaultCommands::Inspect");
+    }
+
+    let cli_vi3 = Cli::try_parse_from(["akashic", "vault", "inspect", "INC-101"])?;
+    if let Commands::Vault { command: VaultCommands::Inspect(args) } = cli_vi3.command {
+        assert_eq!(args.node_id(), Some("INC-101"));
+    } else {
+        panic!("Expected VaultCommands::Inspect");
+    }
+
+    // 3. Test MCP serde compatibility for node_id / note_id alias
+    let inspect_json = r#"{"node_id": "INC-123"}"#;
+    let inspect_params: VaultInspectParams = serde_json::from_str(inspect_json)?;
+    assert_eq!(inspect_params.node_id, "INC-123");
+
+    let inspect_json_legacy = r#"{"note_id": "INC-123"}"#;
+    let inspect_params_legacy: VaultInspectParams = serde_json::from_str(inspect_json_legacy)?;
+    assert_eq!(inspect_params_legacy.node_id, "INC-123");
+
+    let query_json = r#"{"mode": "current", "node_id": "INC-123"}"#;
+    let query_params: VaultQueryParams = serde_json::from_str(query_json)?;
+    assert_eq!(query_params.node_id.as_deref(), Some("INC-123"));
+
+    let query_json_legacy = r#"{"mode": "current", "note_id": "INC-123"}"#;
+    let query_params_legacy: VaultQueryParams = serde_json::from_str(query_json_legacy)?;
+    assert_eq!(query_params_legacy.node_id.as_deref(), Some("INC-123"));
+
+    // 4. Test MCP server with custom config and "Vault Node '{}' not found" errors
+    let temp_vault = tempfile::tempdir()?;
+    let mcp_server = AkashicMcpServer::with_config(
+        temp_vault.path().to_path_buf(),
+        temp_vault.path().to_path_buf(),
+        ctx.config.clone(),
+    );
+    assert_eq!(mcp_server.graph_db_path(), std::path::PathBuf::from("custom-engine.db"));
+    assert_eq!(mcp_server.rca_db_path(), std::path::PathBuf::from("custom-rca.db"));
+
+    // Query non-existent node
+    let query_res = mcp_server.vault_query(Parameters(VaultQueryParams {
+        mode: "current".to_string(),
+        scope: None,
+        node_id: Some("NON_EXISTENT".to_string()),
+    })).await;
+    assert!(query_res.is_error.unwrap_or(false));
+    let err_str = serde_json::to_string(&query_res)?;
+    assert!(
+        err_str.contains("Vault Node 'NON_EXISTENT' not found"),
+        "Error message must align with Vault Node terminology: {}",
+        err_str
+    );
+
+    // Inspect non-existent node
+    let inspect_res = mcp_server.vault_inspect(Parameters(VaultInspectParams {
+        node_id: "NON_EXISTENT".to_string(),
+    })).await;
+    assert!(inspect_res.is_error.unwrap_or(false));
+    let err_str = serde_json::to_string(&inspect_res)?;
+    assert!(
+        err_str.contains("Vault Node 'NON_EXISTENT' not found"),
+        "Error message must align with Vault Node terminology: {}",
+        err_str
+    );
+
+    // 5. Test CLI binary invocation for "Vault Node 'NON_EXISTENT' not found" error output
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"))
+        .args(["--config", config_path_str, "vault", "inspect", "NON_EXISTENT"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Vault Node 'NON_EXISTENT' not found"),
+        "CLI stderr must contain Vault Node not found error, got: {}",
+        stderr
+    );
+
+    Ok(())
+}
+

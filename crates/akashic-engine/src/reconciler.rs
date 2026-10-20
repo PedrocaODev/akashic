@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 use akashic_sanitize::SanitizerProfile;
 use akashic_embedding::EmbeddingProvider;
-use crate::store::{GraphStore, CodeEdge, ConfidenceTier};
+use crate::store::{GraphStore, ConfidenceTier};
 use crate::ingestor::{diff_commits, read_blob_at_commit, walk_worktree_files, resolve_commit_sha, list_tree_files};
 use crate::ast::{extract_file_graph, resolve_intra_repo_edges};
 use crate::filter::{evaluate_file_significance, SignificanceVerdict};
@@ -35,11 +35,11 @@ fn finalize_indexing(
     resolve_intra_repo_edges(&all_symbols, &mut all_edges);
     
     // Upsert resolved edges
-    for edge in all_edges {
-        if edge.confidence_tier == ConfidenceTier::Extracted {
-            store.upsert_edge(&edge)?;
-        }
-    }
+    let resolved_edges: Vec<_> = all_edges
+        .into_iter()
+        .filter(|e| e.confidence_tier == ConfidenceTier::Extracted)
+        .collect();
+    store.upsert_edges_batch(&resolved_edges)?;
     
     // Update repository record with last_indexed_sha
     if let Ok(Some(mut repo)) = store.get_repository(repo_name) {
@@ -178,14 +178,10 @@ pub fn reconcile_incremental<S: SanitizerProfile, E: EmbeddingProvider>(
                 store.delete_edges_by_file(repo_name, &file_path)?;
                 
                 if let Some(graph) = after {
-                    for sym in &graph.symbols {
-                        store.upsert_symbol(sym)?;
-                        report.symbols_upserted += 1;
-                    }
-                    for edge in &graph.edges {
-                        store.upsert_edge(edge)?;
-                        report.extracted_edges += 1;
-                    }
+                    store.upsert_symbols_batch(&graph.symbols)?;
+                    report.symbols_upserted += graph.symbols.len();
+                    store.upsert_edges_batch(&graph.edges)?;
+                    report.extracted_edges += graph.edges.len();
                 } else if before.is_some() {
                     report.symbols_removed += before.unwrap().symbols.len();
                 }

@@ -1,6 +1,6 @@
 use akashic_embedding::EmbeddingProvider;
 use akashic_sanitize::SanitizerProfile;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -8,6 +8,15 @@ use std::path::{Path, PathBuf};
 use crate::frontmatter::ParsedDocument;
 use crate::graph::VaultGraph;
 use crate::VaultError;
+
+fn register_sqlite_vec() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    });
+}
 
 /// Search hit returned by keyword or hybrid searches.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -36,6 +45,7 @@ pub struct VaultIndex {
 impl VaultIndex {
     /// Opens or creates the SQLite index at `db_path`, configuring WAL mode and creating schemas.
     pub fn open(db_path: &Path) -> Result<Self, VaultError> {
+        register_sqlite_vec();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -87,10 +97,9 @@ impl VaultIndex {
                 custom_json
             );
 
-            CREATE TABLE IF NOT EXISTS vault_embeddings (
+            CREATE VIRTUAL TABLE IF NOT EXISTS vault_vec USING vec0(
                 node_id TEXT PRIMARY KEY,
-                dimensions INTEGER NOT NULL,
-                embedding_json TEXT NOT NULL
+                embedding float[384] distance_metric=cosine
             );",
         )?;
 
@@ -98,6 +107,35 @@ impl VaultIndex {
             db_path: db_path.to_path_buf(),
             conn,
         })
+    }
+
+    pub fn ensure_vec_table_dimension(&self, dim: usize) -> Result<(), VaultError> {
+        if dim == 0 {
+            return Ok(());
+        }
+        let expected_fragment = format!("float[{dim}]");
+        let current_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vault_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let needs_recreate = match current_sql {
+            Some(sql) => !sql.contains(&expected_fragment),
+            None => true,
+        };
+        if needs_recreate {
+            self.conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS vault_vec;
+                 CREATE VIRTUAL TABLE vault_vec USING vec0(
+                     node_id TEXT PRIMARY KEY,
+                     embedding float[{dim}] distance_metric=cosine
+                 );"
+            ))?;
+        }
+        Ok(())
     }
 
     /// Opens the index at `<vault_root>/.akashic/vault_index.db`.
@@ -117,13 +155,19 @@ impl VaultIndex {
         sanitizer: Option<&dyn SanitizerProfile>,
         embedding: Option<&dyn EmbeddingProvider>,
     ) -> Result<IndexStats, VaultError> {
+        if let Some(emb) = embedding {
+            if emb.is_available() {
+                self.ensure_vec_table_dimension(emb.dimensions())?;
+            }
+        }
+
         let mut stats = IndexStats::default();
 
         let tx = self.conn.transaction()?;
 
         // Clear existing tables
         tx.execute("DELETE FROM vault_fts;", [])?;
-        tx.execute("DELETE FROM vault_embeddings;", [])?;
+        tx.execute("DELETE FROM vault_vec;", [])?;
         tx.execute("DELETE FROM vault_relations;", [])?;
         tx.execute("DELETE FROM vault_nodes;", [])?;
 
@@ -230,15 +274,12 @@ impl VaultIndex {
                     .collect();
 
                 if let Ok(vectors) = emb.embed_batch(&texts) {
+                    let mut stmt = tx.prepare(
+                        "INSERT INTO vault_vec (node_id, embedding) VALUES (?1, ?2);",
+                    )?;
                     for (doc, vec) in node_docs.iter().zip(vectors.into_iter()) {
-                        let vec_json = serde_json::to_string(&vec)
-                            .map_err(|e| VaultError::Serialization(e.to_string()))?;
-
-                        tx.execute(
-                            "INSERT INTO vault_embeddings (node_id, dimensions, embedding_json)
-                             VALUES (?1, ?2, ?3);",
-                            params![doc.frontmatter.id, emb.dimensions(), vec_json],
-                        )?;
+                        let bytes = zerocopy::IntoBytes::as_bytes(vec.as_slice());
+                        stmt.execute(params![doc.frontmatter.id, bytes])?;
                         stats.embeddings_indexed += 1;
                     }
                 }
@@ -369,22 +410,34 @@ impl VaultIndex {
             keyword_rank.insert(hit.id.clone(), rank);
         }
 
-        // 2. Get vector rank list from stored embeddings
-        let mut stmt = self
+        // 2. Get vector rank list from stored embeddings via sqlite-vec KNN
+        let expected_fragment = format!("float[{}]", query_vec.len());
+        let current_sql: Option<String> = self
             .conn
-            .prepare("SELECT node_id, embedding_json FROM vault_embeddings;")?;
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vault_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
 
         let mut vector_scores: Vec<(String, f64)> = Vec::new();
-        let rows = stmt.query_map([], |row| {
-            let node_id: String = row.get(0)?;
-            let json_str: String = row.get(1)?;
-            Ok((node_id, json_str))
-        })?;
+        if let Some(sql) = current_sql {
+            if sql.contains(&expected_fragment) && !query_vec.is_empty() {
+                let k_knn = (limit * 2).max(10).min(4096) as i64;
+                let query_bytes = zerocopy::IntoBytes::as_bytes(query_vec.as_slice());
+                let mut stmt = self.conn.prepare(
+                    "SELECT node_id, distance FROM vault_vec WHERE embedding MATCH ?1 AND k = ?2",
+                )?;
+                let rows = stmt.query_map(params![query_bytes, k_knn], |row| {
+                    let node_id: String = row.get(0)?;
+                    let dist_opt: Option<f32> = row.get(1)?;
+                    Ok((node_id, dist_opt))
+                })?;
 
-        for r in rows {
-            if let Ok((node_id, json_str)) = r {
-                if let Ok(vec) = serde_json::from_str::<Vec<f32>>(&json_str) {
-                    let sim = cosine_similarity(&query_vec, &vec);
+                for r in rows {
+                    let (node_id, dist_opt) = r?;
+                    let sim = 1.0 - (dist_opt.unwrap_or(1.0) as f64);
                     vector_scores.push((node_id, sim));
                 }
             }
@@ -472,27 +525,81 @@ impl VaultIndex {
     }
 }
 
-/// Computes cosine similarity between two float vectors.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir() -> Result<TempDir, std::io::Error> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("akashic-vault-index-test-{}-{}", std::process::id(), id));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        Ok(TempDir(dir))
     }
 
-    let mut dot = 0.0f64;
-    let mut norm_a = 0.0f64;
-    let mut norm_b = 0.0f64;
+    #[test]
+    fn test_vault_vec_virtual_table_created() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("vault_index.db");
+        let index = VaultIndex::open(&db_path).unwrap();
 
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        let x64 = x as f64;
-        let y64 = y as f64;
-        dot += x64 * y64;
-        norm_a += x64 * x64;
-        norm_b += y64 * y64;
+        // Check that vault_vec virtual table exists
+        let table_sql: String = index
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vault_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_sql.contains("vec0"), "vault_vec must use vec0 virtual table");
+        assert!(
+            table_sql.contains("float[384]"),
+            "vault_vec default dimension must be 384"
+        );
+
+        // Verify obsolete vault_embeddings table does not exist
+        let old_table: Option<String> = index
+            .conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'vault_embeddings'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert!(old_table.is_none(), "vault_embeddings table must not exist");
     }
 
-    if norm_a <= 0.0 || norm_b <= 0.0 {
-        return 0.0;
-    }
+    #[test]
+    fn test_vault_vec_dimension_change() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("vault_index.db");
+        let index = VaultIndex::open(&db_path).unwrap();
 
-    dot / (norm_a.sqrt() * norm_b.sqrt())
+        index.ensure_vec_table_dimension(4).unwrap();
+        let table_sql: String = index
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vault_vec'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_sql.contains("float[4]"));
+    }
 }

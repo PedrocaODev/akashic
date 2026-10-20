@@ -2,7 +2,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -180,6 +180,13 @@ impl VaultGraph {
         }
 
         // Pass 2: Resolve relations and add edges
+        vault.resolve_and_add_edges(parsed_nodes);
+
+        Ok(vault)
+    }
+
+    /// Helper to resolve relations and insert directed edges into the graph.
+    fn resolve_and_add_edges(&mut self, parsed_nodes: Vec<(NodeIndex, ParsedDocument)>) {
         for (src_idx, doc) in parsed_nodes {
             let src_id = doc.frontmatter.id.clone();
             let src_rel_path = doc.relative_path.clone();
@@ -191,11 +198,11 @@ impl VaultGraph {
 
             for rel in &doc.frontmatter.relations {
                 let target_raw = rel.target.trim();
-                let resolved_idx = vault.resolve_target(src_dir, target_raw);
+                let resolved_idx = self.resolve_target(src_dir, target_raw);
 
                 match resolved_idx {
                     Some(tgt_idx) => {
-                        vault.graph.add_edge(
+                        self.graph.add_edge(
                             src_idx,
                             tgt_idx,
                             EdgeData {
@@ -206,7 +213,7 @@ impl VaultGraph {
                         );
                     }
                     None => {
-                        vault.unresolved_relations.push(UnresolvedRelation {
+                        self.unresolved_relations.push(UnresolvedRelation {
                             source_id: src_id.clone(),
                             source_path: src_rel_path.clone(),
                             target: target_raw.to_string(),
@@ -218,6 +225,111 @@ impl VaultGraph {
                 }
             }
         }
+    }
+
+    /// Discovers and parses Markdown notes under `root`, overlaying a `MigrationPlan` in-memory.
+    pub fn from_dir_with_plan(
+        root: &Path,
+        plan: &crate::migrator::MigrationPlan,
+    ) -> Result<Self, VaultError> {
+        if !root.exists() {
+            return Err(VaultError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Vault directory does not exist: {}", root.display()),
+            )));
+        }
+        if !root.is_dir() {
+            return Err(VaultError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Path is not a directory: {}", root.display()),
+            )));
+        }
+
+        let mut files_map: BTreeMap<String, (PathBuf, String)> = BTreeMap::new();
+
+        for entry_res in WalkDir::new(root)
+            .into_iter()
+            .filter_entry(|e| !should_ignore_entry(e))
+        {
+            let entry = match entry_res {
+                Ok(e) => e,
+                Err(err) => {
+                    return Err(VaultError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err.to_string(),
+                    )));
+                }
+            };
+
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+                        let rel = path
+                            .strip_prefix(root)
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        let content = std::fs::read_to_string(path)?;
+                        files_map.insert(rel, (path.to_path_buf(), content));
+                    }
+                }
+            }
+        }
+
+        // Overlay plan.changes onto the map
+        for change in &plan.changes {
+            let rel = change.path.replace('\\', "/");
+            match change.action {
+                crate::migrator::ChangeAction::Delete => {
+                    files_map.remove(&rel);
+                }
+                crate::migrator::ChangeAction::Modify | crate::migrator::ChangeAction::Create => {
+                    let full_path = root.join(&change.path);
+                    if let Some(ext) = full_path.extension().and_then(|s| s.to_str()) {
+                        if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+                            if let Some(ref content) = change.new_content {
+                                files_map.insert(rel, (full_path, content.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut vault = Self::new(root);
+        let mut parsed_nodes: Vec<(NodeIndex, ParsedDocument)> = Vec::new();
+
+        // Pass 1: Parse markdown documents from map
+        for (_rel, (full_path, content)) in files_map {
+            match crate::parser::parse_markdown_str(root, &full_path, &content) {
+                Ok(doc) => {
+                    let id = doc.frontmatter.id.clone();
+                    let rel_doc = doc.relative_path.clone();
+
+                    if let Some(&existing_idx) = vault.node_by_id.get(&id) {
+                        let existing_path = vault.graph[existing_idx].path.clone();
+                        vault.duplicate_ids.push((
+                            id.clone(),
+                            existing_path,
+                            full_path.clone(),
+                        ));
+                    }
+
+                    vault.documents.insert(id.clone(), doc.clone());
+                    let idx = vault.graph.add_node(doc.clone());
+                    vault.node_by_id.insert(id, idx);
+                    vault.node_by_path.insert(rel_doc, idx);
+                    parsed_nodes.push((idx, doc));
+                }
+                Err(err) => {
+                    vault.malformed_files.push((full_path, err.to_string()));
+                }
+            }
+        }
+
+        // Pass 2: Resolve relations and add edges
+        vault.resolve_and_add_edges(parsed_nodes);
 
         Ok(vault)
     }

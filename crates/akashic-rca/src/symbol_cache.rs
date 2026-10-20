@@ -1,6 +1,6 @@
 use crate::RcaError;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -17,16 +17,28 @@ pub struct SymbolArtifactEntry {
 }
 
 #[derive(Debug, Default)]
-struct CacheInner {
+struct CacheState {
     entries: HashMap<String, SymbolArtifactEntry>,
+    lru_order: BTreeSet<(u128, String)>,
     total_size_bytes: u64,
+    last_timestamp_ns: u128,
 }
+
+impl CacheState {
+    fn next_timestamp_ns(&mut self) -> u128 {
+        let now = current_timestamp_nanos().max(self.last_timestamp_ns.saturating_add(1));
+        self.last_timestamp_ns = now;
+        now
+    }
+}
+
+type CacheInner = CacheState;
 
 #[derive(Debug, Clone)]
 pub struct SymbolCache {
     root_dir: PathBuf,
     max_bytes: u64,
-    inner: Arc<Mutex<CacheInner>>,
+    inner: Arc<Mutex<CacheState>>,
 }
 
 fn current_timestamp_nanos() -> u128 {
@@ -87,14 +99,23 @@ impl SymbolCache {
                         .file_name()
                         .to_string_lossy()
                         .to_string();
-                    let accessed_ns = meta
+                    let raw_accessed_ns = meta
                         .modified()
                         .ok()
                         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                         .map(|d| d.as_nanos())
                         .unwrap_or_else(current_timestamp_nanos);
 
+                    let accessed_ns = raw_accessed_ns.max(inner.last_timestamp_ns.saturating_add(1));
+                    inner.last_timestamp_ns = accessed_ns;
+
+                    if let Some(old) = inner.entries.remove(&key) {
+                        inner.total_size_bytes = inner.total_size_bytes.saturating_sub(old.size_bytes);
+                        inner.lru_order.remove(&(old.last_accessed_ns, old.key));
+                    }
+
                     inner.total_size_bytes = inner.total_size_bytes.saturating_add(size);
+                    inner.lru_order.insert((accessed_ns, key.clone()));
                     inner.entries.insert(
                         key.clone(),
                         SymbolArtifactEntry {
@@ -120,18 +141,20 @@ impl SymbolCache {
 
         fs::write(&file_path, bytes)?;
         let size = bytes.len() as u64;
-        let now = current_timestamp_nanos();
 
         {
             let mut inner = self.inner.lock().map_err(|e| {
                 RcaError::Execution(format!("SymbolCache mutex poisoned: {}", e))
             })?;
 
-            if let Some(existing) = inner.entries.get(key) {
+            if let Some(existing) = inner.entries.remove(key) {
                 inner.total_size_bytes = inner.total_size_bytes.saturating_sub(existing.size_bytes);
+                inner.lru_order.remove(&(existing.last_accessed_ns, existing.key));
             }
 
+            let now = inner.next_timestamp_ns();
             inner.total_size_bytes = inner.total_size_bytes.saturating_add(size);
+            inner.lru_order.insert((now, key.to_string()));
             inner.entries.insert(
                 key.to_string(),
                 SymbolArtifactEntry {
@@ -149,17 +172,26 @@ impl SymbolCache {
 
     pub fn get_artifact(&self, key: &str) -> Option<PathBuf> {
         let mut inner = self.inner.lock().ok()?;
-        if let Some(entry) = inner.entries.get_mut(key) {
-            if entry.path.exists() {
-                entry.last_accessed_ns = current_timestamp_nanos();
-                return Some(entry.path.clone());
-            } else {
-                let size = entry.size_bytes;
-                inner.total_size_bytes = inner.total_size_bytes.saturating_sub(size);
-                inner.entries.remove(key);
+        let (path, exists, old_accessed_ns) = match inner.entries.get(key) {
+            Some(entry) => (entry.path.clone(), entry.path.exists(), entry.last_accessed_ns),
+            None => return None,
+        };
+
+        if exists {
+            let new_ns = inner.next_timestamp_ns();
+            inner.lru_order.remove(&(old_accessed_ns, key.to_string()));
+            inner.lru_order.insert((new_ns, key.to_string()));
+            if let Some(entry) = inner.entries.get_mut(key) {
+                entry.last_accessed_ns = new_ns;
             }
+            Some(path)
+        } else {
+            if let Some(entry) = inner.entries.remove(key) {
+                inner.total_size_bytes = inner.total_size_bytes.saturating_sub(entry.size_bytes);
+                inner.lru_order.remove(&(entry.last_accessed_ns, entry.key));
+            }
+            None
         }
-        None
     }
 
     pub fn total_size_bytes(&self) -> u64 {
@@ -182,20 +214,12 @@ impl SymbolCache {
         })?;
 
         while inner.total_size_bytes > self.max_bytes && !inner.entries.is_empty() {
-            // Find entry with smallest last_accessed_ns
-            let oldest_key = inner
-                .entries
-                .values()
-                .min_by_key(|e| e.last_accessed_ns)
-                .map(|e| e.key.clone());
-
-            if let Some(key) = oldest_key {
-                if let Some(entry) = inner.entries.remove(&key) {
-                    inner.total_size_bytes = inner.total_size_bytes.saturating_sub(entry.size_bytes);
-                    let _ = fs::remove_file(&entry.path);
-                }
-            } else {
+            let Some((_oldest_ns, key)) = inner.lru_order.pop_first() else {
                 break;
+            };
+            if let Some(entry) = inner.entries.remove(&key) {
+                inner.total_size_bytes = inner.total_size_bytes.saturating_sub(entry.size_bytes);
+                let _ = fs::remove_file(&entry.path);
             }
         }
 
@@ -436,5 +460,64 @@ mod tests {
             res,
             Some("android::CameraClient::notifyError at CameraClient.cpp:42".to_string())
         );
+    }
+
+    #[test]
+    fn test_symbol_cache_multi_entry_logarithmic_lru_eviction_order() {
+        let temp_dir = TempDir::new("sym_cache_multi_evict");
+        // Capacity: 100 bytes
+        let cache = SymbolCache::with_max_bytes(temp_dir.path(), 100).unwrap();
+
+        // 1. Insert 5 artifacts of 15 bytes each (15 * 5 = 75 bytes)
+        let b15 = vec![b'x'; 15];
+        cache.put_artifact("art1", &b15).unwrap();
+        cache.put_artifact("art2", &b15).unwrap();
+        cache.put_artifact("art3", &b15).unwrap();
+        cache.put_artifact("art4", &b15).unwrap();
+        cache.put_artifact("art5", &b15).unwrap();
+
+        assert_eq!(cache.entry_count(), 5);
+        assert_eq!(cache.total_size_bytes(), 75);
+
+        // 2. Access / update a subset in a specific order:
+        // Access art2 via get_artifact (moves art2 to newest)
+        assert!(cache.get_artifact("art2").is_some());
+        // Overwrite art1 with 20 bytes via put_artifact (moves art1 to newest)
+        let b20 = vec![b'y'; 20];
+        cache.put_artifact("art1", &b20).unwrap();
+
+        // Current sizes:
+        // art3: 15, art4: 15, art5: 15, art2: 15, art1: 20 -> total = 80 bytes
+        // LRU order (oldest to newest): art3, art4, art5, art2, art1
+        assert_eq!(cache.entry_count(), 5);
+        assert_eq!(cache.total_size_bytes(), 80);
+
+        // 3. Insert a larger artifact that triggers multi-entry eviction (K = 2 entries)
+        // 80 + 40 = 120 > 100.
+        // Evicting art3 (15 bytes) brings total to 105 > 100.
+        // Evicting art4 (15 bytes) brings total to 90 <= 100.
+        // So exactly 2 items (art3 and art4) must be evicted!
+        let b40 = vec![b'z'; 40];
+        cache.put_artifact("art_large", &b40).unwrap();
+
+        assert_eq!(cache.entry_count(), 4);
+        assert_eq!(cache.total_size_bytes(), 90);
+
+        // Oldest 2 entries must be gone from memory and disk
+        assert!(cache.get_artifact("art3").is_none());
+        assert!(cache.get_artifact("art4").is_none());
+        assert!(!temp_dir.path().join("art3").exists());
+        assert!(!temp_dir.path().join("art4").exists());
+
+        // More recently accessed/updated entries remain present
+        assert!(cache.get_artifact("art5").is_some());
+        assert!(cache.get_artifact("art2").is_some());
+        assert!(cache.get_artifact("art1").is_some());
+        assert!(cache.get_artifact("art_large").is_some());
+
+        assert!(temp_dir.path().join("art5").exists());
+        assert!(temp_dir.path().join("art2").exists());
+        assert!(temp_dir.path().join("art1").exists());
+        assert!(temp_dir.path().join("art_large").exists());
     }
 }

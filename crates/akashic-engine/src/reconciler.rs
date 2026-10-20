@@ -102,14 +102,10 @@ pub fn index_repository_at_rev<S: SanitizerProfile, E: EmbeddingProvider>(
                 store.delete_symbols_by_file(repo_name, &file_path)?;
                 store.delete_edges_by_file(repo_name, &file_path)?;
                 
-                for sym in &graph.symbols {
-                    store.upsert_symbol(sym)?;
-                    report.symbols_upserted += 1;
-                }
-                for edge in &graph.edges {
-                    store.upsert_edge(edge)?;
-                    report.extracted_edges += 1;
-                }
+                store.upsert_symbols_batch(&graph.symbols)?;
+                report.symbols_upserted += graph.symbols.len();
+                store.upsert_edges_batch(&graph.edges)?;
+                report.extracted_edges += graph.edges.len();
                 report.files_indexed += 1;
             }
         }

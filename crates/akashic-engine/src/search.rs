@@ -51,29 +51,52 @@ pub fn compute_embeddings_and_inferred_edges<E: EmbeddingProvider>(
         }
     }
     
-    let mut inferred_count = 0;
+    let mut new_edges = Vec::new();
+    let mut seen_pairs = std::collections::HashSet::new();
     
     for i in 0..ids.len() {
-        for j in (i + 1)..ids.len() {
+        let mut candidates = Vec::new();
+        for j in 0..ids.len() {
+            if i == j {
+                continue;
+            }
             let sim = cosine_similarity(&vectors[i], &vectors[j]);
             if sim >= threshold {
-                let s_id = &ids[i];
-                let t_id = &ids[j];
-                
-                if !existing_pairs.contains(&(s_id.clone(), t_id.clone())) && !existing_pairs.contains(&(t_id.clone(), s_id.clone())) {
-                    store.upsert_edge(&CodeEdge {
-                        source_id: s_id.clone(),
-                        target_id: t_id.clone(),
-                        edge_type: "SEMANTIC_SIMILARITY".to_string(),
-                        confidence_tier: ConfidenceTier::Inferred,
-                        confidence_score: sim as f64,
-                        evidence: format!("Cosine similarity: {:.3}", sim),
-                    })?;
-                    inferred_count += 1;
-                }
+                candidates.push((j, sim));
+            }
+        }
+        
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(5);
+        
+        for (j, sim) in candidates {
+            let s_id = &ids[i];
+            let t_id = &ids[j];
+            
+            let pair1 = (s_id.clone(), t_id.clone());
+            let pair2 = (t_id.clone(), s_id.clone());
+            
+            if !existing_pairs.contains(&pair1)
+                && !existing_pairs.contains(&pair2)
+                && !seen_pairs.contains(&pair1)
+                && !seen_pairs.contains(&pair2)
+            {
+                seen_pairs.insert(pair1);
+                seen_pairs.insert(pair2);
+                new_edges.push(CodeEdge {
+                    source_id: s_id.clone(),
+                    target_id: t_id.clone(),
+                    edge_type: "SEMANTIC_SIMILARITY".to_string(),
+                    confidence_tier: ConfidenceTier::Inferred,
+                    confidence_score: sim as f64,
+                    evidence: format!("Cosine similarity: {:.3}", sim),
+                });
             }
         }
     }
+    
+    let inferred_count = new_edges.len();
+    store.upsert_edges_batch(&new_edges)?;
     
     Ok(inferred_count)
 }

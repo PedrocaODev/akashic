@@ -1,6 +1,6 @@
 use crate::store::{GraphStore, CommunityRecord, ConfidenceTier};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub fn detect_communities(store: &GraphStore, repo_name: &str) -> Result<Vec<CommunityRecord>> {
     let symbols = store.get_symbols_by_repo(repo_name)?;
@@ -18,20 +18,18 @@ pub fn detect_communities(store: &GraphStore, repo_name: &str) -> Result<Vec<Com
         *adj.entry(edge.target_id.clone()).or_default().entry(edge.source_id.clone()).or_default() += weight;
     }
     
-    for i in 0..symbols.len() {
-        for j in (i+1)..symbols.len() {
-            let s1 = &symbols[i];
-            let s2 = &symbols[j];
-            if s1.file_path == s2.file_path {
+    let mut file_buckets: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (idx, sym) in symbols.iter().enumerate() {
+        file_buckets.entry(sym.file_path.as_str()).or_default().push(idx);
+    }
+
+    for indices in file_buckets.values() {
+        for (pos, &i) in indices.iter().enumerate() {
+            for &j in &indices[(pos + 1)..] {
+                let s1 = &symbols[i];
+                let s2 = &symbols[j];
                 *adj.entry(s1.id.clone()).or_default().entry(s2.id.clone()).or_default() += 0.3;
                 *adj.entry(s2.id.clone()).or_default().entry(s1.id.clone()).or_default() += 0.3;
-            } else {
-                let pkg1: Vec<&str> = s1.symbol_name.split('.').take(3).collect();
-                let pkg2: Vec<&str> = s2.symbol_name.split('.').take(3).collect();
-                if !pkg1.is_empty() && pkg1 == pkg2 {
-                    *adj.entry(s1.id.clone()).or_default().entry(s2.id.clone()).or_default() += 0.1;
-                    *adj.entry(s2.id.clone()).or_default().entry(s1.id.clone()).or_default() += 0.1;
-                }
             }
         }
     }
@@ -64,7 +62,7 @@ pub fn detect_communities(store: &GraphStore, repo_name: &str) -> Result<Vec<Com
                 }
             }
             
-            if let Some((&best_comm, _)) = comm_weights.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+            if let Some((&best_comm, _)) = comm_weights.iter().max_by(|a, b| a.1.total_cmp(b.1).then_with(|| b.0.cmp(a.0))) {
                 if best_comm != current_comm {
                     node_community.insert(id.clone(), best_comm);
                     changed = true;
@@ -136,4 +134,90 @@ pub fn detect_communities(store: &GraphStore, repo_name: &str) -> Result<Vec<Com
     }
     
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::CodeSymbol;
+
+    #[test]
+    fn test_file_bucketed_community_detection() {
+        let store = GraphStore::open_in_memory().unwrap();
+        let repo = "repo_bucket_test";
+
+        let sym1 = CodeSymbol {
+            id: "repo::f1.rs::s1".into(),
+            repo_name: repo.into(),
+            file_path: "f1.rs".into(),
+            symbol_name: "s1".into(),
+            kind: "function".into(),
+            signature: "fn s1()".into(),
+            visibility: "pub".into(),
+            start_line: 1,
+            end_line: 5,
+            doc_comment: "".into(),
+            community_id: None,
+            commit_sha: "head".into(),
+        };
+        let sym2 = CodeSymbol {
+            id: "repo::f1.rs::s2".into(),
+            repo_name: repo.into(),
+            file_path: "f1.rs".into(),
+            symbol_name: "s2".into(),
+            kind: "function".into(),
+            signature: "fn s2()".into(),
+            visibility: "pub".into(),
+            start_line: 7,
+            end_line: 10,
+            doc_comment: "".into(),
+            community_id: None,
+            commit_sha: "head".into(),
+        };
+        let sym3 = CodeSymbol {
+            id: "repo::f2.rs::s3".into(),
+            repo_name: repo.into(),
+            file_path: "f2.rs".into(),
+            symbol_name: "s3".into(),
+            kind: "function".into(),
+            signature: "fn s3()".into(),
+            visibility: "pub".into(),
+            start_line: 1,
+            end_line: 5,
+            doc_comment: "".into(),
+            community_id: None,
+            commit_sha: "head".into(),
+        };
+        let sym4 = CodeSymbol {
+            id: "repo::f2.rs::s4".into(),
+            repo_name: repo.into(),
+            file_path: "f2.rs".into(),
+            symbol_name: "s4".into(),
+            kind: "function".into(),
+            signature: "fn s4()".into(),
+            visibility: "pub".into(),
+            start_line: 7,
+            end_line: 10,
+            doc_comment: "".into(),
+            community_id: None,
+            commit_sha: "head".into(),
+        };
+
+        store.upsert_symbol(&sym1).unwrap();
+        store.upsert_symbol(&sym2).unwrap();
+        store.upsert_symbol(&sym3).unwrap();
+        store.upsert_symbol(&sym4).unwrap();
+
+        let comms = detect_communities(&store, repo).unwrap();
+        assert!(!comms.is_empty());
+
+        let sym1_updated = store.get_symbol_by_id(&sym1.id).unwrap().unwrap();
+        let sym2_updated = store.get_symbol_by_id(&sym2.id).unwrap().unwrap();
+        let sym3_updated = store.get_symbol_by_id(&sym3.id).unwrap().unwrap();
+        let sym4_updated = store.get_symbol_by_id(&sym4.id).unwrap().unwrap();
+
+        assert_eq!(sym1_updated.community_id, sym2_updated.community_id);
+        assert_eq!(sym3_updated.community_id, sym4_updated.community_id);
+        assert_ne!(sym1_updated.community_id, sym3_updated.community_id);
+    }
 }

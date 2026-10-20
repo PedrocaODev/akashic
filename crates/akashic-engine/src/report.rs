@@ -42,7 +42,10 @@ pub fn generate_graph_report(store: &GraphStore, repo_name: &str) -> Result<Stri
     out.push_str("## God Nodes (High-Degree Architectural Hubs)\n");
     let gods = god_nodes(store, repo_name, 10)?;
     for g in gods {
-        out.push_str(&format!("- `{}` (In: {}, Out: {}, Total: {})\n", g.symbol.symbol_name, g.in_degree, g.out_degree, g.total_degree));
+        out.push_str(&format!(
+            "- `{}` (In: {}, Out: {}, Total: {}, Betweenness: {:.2})\n",
+            g.symbol.symbol_name, g.in_degree, g.out_degree, g.total_degree, g.betweenness_centrality
+        ));
     }
     out.push_str("\n");
     

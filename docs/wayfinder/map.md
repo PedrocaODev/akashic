@@ -33,14 +33,11 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 
 ## Frontier (Unblocked)
 
-- [15 — Unified CLI Context Prefactor and Vault Node Terminology Alignment](tickets/15-unified-cli-context-prefactor-and-vault-node-terminology.md) (`ready-for-agent`)
-- [17 — `sqlite-vec` Virtual Table Persistence and Threshold-Faithful Inferred Code Edges](tickets/17-sqlite-vec-virtual-tables-and-inferred-code-edges.md) (`ready-for-agent`)
-- [18 — Betweenness Centrality God Nodes, File-Bucketed Graph Communities, and Bounded Top-K Analytics](tickets/18-betweenness-centrality-god-nodes-and-bounded-graph-analytics.md) (`ready-for-agent`)
-- [19 — $O(\log N)$ Symbol Store LRU Cache Eviction and Min-Heap Adaptive Debouncer](tickets/19-logarithmic-symbol-cache-lru-and-min-heap-debouncer.md) (`ready-for-agent`)
+*(None)*
 
 ## Blocked
 
-- [16 — Strict Plan-Then-Apply Vault Mutation and Pre-Apply Lint Gate](tickets/16-strict-plan-then-apply-vault-mutation-and-lint-gate.md) (`ready-for-agent`, blocked by 15)
+*(None)*
 
 ## Completed
 
@@ -58,5 +55,10 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - [12 — Unified `akashic mcp` Server Registration and Tool Schema Cutover](tickets/12-unified-akashic-mcp-server-registration-and-schema-cutover.md) (`done`)
 - [13 — `akashic-cli` and `graphify` Skills Clean-Slate Overhaul](tickets/13-akashic-cli-and-graphify-skills-clean-slate-overhaul.md) (`done`)
 - [14 — Global `GEMINI.md` and Specialist Agent Rules Alignment](tickets/14-global-gemini-md-and-specialist-agent-rules-alignment.md) (`done`)
+- [15 — Unified CLI Context Prefactor and Vault Node Terminology Alignment](tickets/15-unified-cli-context-prefactor-and-vault-node-terminology.md) (`done`)
+- [16 — Strict Plan-Then-Apply Vault Mutation and Pre-Apply Lint Gate](tickets/16-strict-plan-then-apply-vault-mutation-and-lint-gate.md) (`done`)
+- [17 — `sqlite-vec` Virtual Table Persistence and Threshold-Faithful Inferred Code Edges](tickets/17-sqlite-vec-virtual-tables-and-inferred-code-edges.md) (`done`)
+- [18 — Betweenness Centrality God Nodes, File-Bucketed Graph Communities, and Bounded Top-K Analytics](tickets/18-betweenness-centrality-god-nodes-and-bounded-graph-analytics.md) (`done`)
+- [19 — $O(\log N)$ Symbol Store LRU Cache Eviction and Min-Heap Adaptive Debouncer](tickets/19-logarithmic-symbol-cache-lru-and-min-heap-debouncer.md) (`done`)
 
-*(Note: Stage 1 & 2 tickets 01–14 are complete. Stage 3 remediation tickets 15–19 are queued.)*
+*(Note: Stage 1, 2, & 3 tickets 01–19 are complete.)*

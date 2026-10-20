@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] **God Node** analysis computes and exposes both node degree centrality (`in_degree`, `out_degree`, `total_degree`) and unweighted Brandes betweenness centrality across the **Code Graph**.
-- [ ] **Graph Community** initialization groups **Code Symbols** into per-file buckets in $O(N)$ time rather than scanning all $N(N-1)/2$ symbol pairs for `file_path` equality.
-- [ ] `god_nodes` and `surprising_connections` use bounded top-$K$ selection (`select_nth_unstable_by` or a capacity-$K$ min-heap) instead of sorting the entire symbol or edge vector before truncation.
-- [ ] Unit and integration tests verify betweenness centrality scores, community cohesion output, and top-$K$ ordering.
+- [x] **God Node** analysis computes and exposes both node degree centrality (`in_degree`, `out_degree`, `total_degree`) and unweighted Brandes betweenness centrality across the **Code Graph**.
+- [x] **Graph Community** initialization groups **Code Symbols** into per-file buckets in $O(N)$ time rather than scanning all $N(N-1)/2$ symbol pairs for `file_path` equality.
+- [x] `god_nodes` and `surprising_connections` use bounded top-$K$ selection (`select_nth_unstable_by` or a capacity-$K$ min-heap) instead of sorting the entire symbol or edge vector before truncation.
+- [x] Unit and integration tests verify betweenness centrality scores, community cohesion output, and top-$K$ ordering.

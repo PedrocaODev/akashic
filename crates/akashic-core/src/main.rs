@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             VaultCommands::Plan(args) => {
-                let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
+                let path = args.path().map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
                 let plan = vault::migrator::plan_vault(&path)?;
                 if let Some(out) = args.out {
                     std::fs::write(&out, serde_json::to_string_pretty(&plan)?)?;
@@ -53,17 +53,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             VaultCommands::Apply(args) => {
-                let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
-                if let Some(plan_file) = args.plan {
-                    let plan_str = std::fs::read_to_string(&plan_file)?;
-                    let plan: vault::migrator::MigrationPlan = serde_json::from_str(&plan_str)?;
-                    let count = vault::migrator::apply_plan(&path, &plan)?;
-                    println!("Applied plan to {} files", count);
-                } else {
-                    let plan = vault::migrator::plan_vault(&path)?;
-                    let count = vault::migrator::apply_plan(&path, &plan)?;
-                    println!("Applied migration to {} files", count);
-                }
+                let path = args.path().map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
+                let plan_path = args.plan.as_deref().map(std::path::Path::new);
+                let count = akashic_core::vault_apply(&path, plan_path, Some(&ctx.config))?;
+                println!("Applied plan to {} files", count);
             }
             VaultCommands::Reindex(args) => {
                 let path = args.path.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));

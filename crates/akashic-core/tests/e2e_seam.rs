@@ -551,3 +551,270 @@ async fn test_cli_runtime_context_and_vault_node_alignment() -> anyhow::Result<(
     Ok(())
 }
 
+#[test]
+fn test_e2e_vault_apply_rejects_missing_plan() -> anyhow::Result<()> {
+    let temp_vault = tempfile::tempdir()?;
+    let vault_path = temp_vault.path();
+
+    // Write a dummy file to ensure vault is non-empty
+    fs::write(
+        vault_path.join("dummy.md"),
+        "---\nid: dummy\ntype: concept\nstatus: draft\n---\n# Dummy\n",
+    )?;
+
+    // 1. CLI invocation without --plan flag fails
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"))
+        .args(["vault", "apply", vault_path.to_str().unwrap()])
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "Command must fail when --plan is omitted"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--plan"),
+        "stderr must mention '--plan', got: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("akashic vault plan"),
+        "stderr must direct operator to 'akashic vault plan', got: {}",
+        stderr
+    );
+
+    // 2. Direct programmatic call with None plan returns Err
+    let res = akashic_core::vault_apply(vault_path, None, None);
+    assert!(res.is_err(), "Direct vault_apply without plan must return Err");
+    let err_msg = res.unwrap_err().to_string();
+    assert!(err_msg.contains("--plan"));
+    assert!(err_msg.contains("akashic vault plan"));
+
+    // 3. Verify files on disk remain untouched and .akashic directory not created
+    assert!(!vault_path.join(".akashic").exists());
+    let dummy_content = fs::read_to_string(vault_path.join("dummy.md"))?;
+    assert_eq!(
+        dummy_content,
+        "---\nid: dummy\ntype: concept\nstatus: draft\n---\n# Dummy\n"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_e2e_vault_plan_then_apply_succeeds() -> anyhow::Result<()> {
+    let temp_vault = tempfile::tempdir()?;
+    let vault_path = temp_vault.path();
+
+    // Create valid initial vault notes that will produce a non-empty plan on plan generation
+    let target_initial = "---\nid: target\n---\n# Target Note\n";
+    let source_initial = "---\nid: source\nrelations:\n  - type: depends_on\n    target: target\n---\n# Source Note\n";
+
+    fs::write(vault_path.join("target.md"), target_initial)?;
+    fs::write(vault_path.join("source.md"), source_initial)?;
+
+    let plan_file = temp_vault.path().join("migration_plan.json");
+
+    // 1. Run akashic vault plan <vault_path> --output <plan_file>
+    let plan_output = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"))
+        .args([
+            "vault",
+            "plan",
+            vault_path.to_str().unwrap(),
+            "--output",
+            plan_file.to_str().unwrap(),
+        ])
+        .output()?;
+
+    assert!(
+        plan_output.status.success(),
+        "vault plan failed: {}",
+        String::from_utf8_lossy(&plan_output.stderr)
+    );
+    assert!(plan_file.exists(), "Plan file must be created on disk");
+
+    // Verify files on disk are unchanged before apply
+    assert_eq!(fs::read_to_string(vault_path.join("target.md"))?, target_initial);
+    assert_eq!(fs::read_to_string(vault_path.join("source.md"))?, source_initial);
+
+    // 2. Run akashic vault apply <vault_path> --plan <plan_file>
+    let apply_output = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"))
+        .args([
+            "vault",
+            "apply",
+            vault_path.to_str().unwrap(),
+            "--plan",
+            plan_file.to_str().unwrap(),
+        ])
+        .output()?;
+
+    assert!(
+        apply_output.status.success(),
+        "vault apply failed: {}",
+        String::from_utf8_lossy(&apply_output.stderr)
+    );
+
+    // Verify files were updated on disk
+    let target_after = fs::read_to_string(vault_path.join("target.md"))?;
+    let source_after = fs::read_to_string(vault_path.join("source.md"))?;
+    assert_ne!(target_after, target_initial);
+    assert_ne!(source_after, source_initial);
+    assert!(target_after.contains("type: concept"));
+    assert!(source_after.contains("type: concept"));
+
+    // Verify backup was created
+    assert!(vault_path.join(".akashic/backups").exists());
+
+    Ok(())
+}
+
+#[test]
+fn test_e2e_vault_apply_aborts_atomically_on_lint_violations() -> anyhow::Result<()> {
+    use akashic_vault::{ChangeAction, MigrationPlan, PlannedFileChange, sha256_hex};
+
+    let cases = vec![
+        (
+            "L001",
+            "invalid_frontmatter.md",
+            "---\nid: [malformed yaml\n---\n# Bad YAML\n",
+            None,
+        ),
+        (
+            "L002",
+            "missing_required.md",
+            "---\ntitle: Missing Required\n---\n# Missing Required\n",
+            None,
+        ),
+        (
+            "L004",
+            "broken_relation.md",
+            "---\nid: broken-rel\ntype: concept\nstatus: draft\ntitle: Broken Rel\nrelations:\n  - type: depends_on\n    target: non_existent_target\n---\n# Broken Rel\n",
+            None,
+        ),
+        (
+            "L011",
+            "prohibited_relation.md",
+            "---\nid: prohibited-rel\ntype: concept\nstatus: draft\ntitle: Prohibited Rel\nrelations:\n  - type: resolved_by\n    target: target\n---\n# Prohibited Rel\n",
+            None,
+        ),
+        (
+            "L012",
+            "custom_field_violation.md",
+            "---\nid: custom-viol\ntype: concept\nstatus: draft\ntitle: Custom Viol\ncustom_status: invalid_status\n---\n# Custom Viol\n",
+            Some(r#"
+[lint.custom_fields.custom_status]
+field_type = "string"
+allowed_values = ["planned", "active", "completed"]
+"#),
+        ),
+    ];
+
+    for (rule_code, file_name, violating_content, config_str) in cases {
+        let temp_vault = tempfile::tempdir()?;
+        let vault_path = temp_vault.path();
+
+        // Write an initial valid file
+        let initial_valid = "---\nid: target\ntype: concept\nstatus: draft\ntitle: Valid Target\n---\n# Valid Target\n";
+        fs::write(vault_path.join("target.md"), initial_valid)?;
+
+        // If config is provided, write it to akashic.toml
+        let config_arg: Option<std::path::PathBuf> = if let Some(cfg) = config_str {
+            let cfg_path = temp_vault.path().join("akashic.toml");
+            fs::write(&cfg_path, cfg)?;
+            Some(cfg_path)
+        } else {
+            None
+        };
+
+        // Construct a plan that introduces the violating content
+        let plan = MigrationPlan {
+            plan_version: "1.0.0".to_string(),
+            vault_root: vault_path.to_string_lossy().to_string(),
+            changes: vec![PlannedFileChange {
+                path: file_name.to_string(),
+                before_sha256: sha256_hex(b""),
+                after_sha256: sha256_hex(violating_content.as_bytes()),
+                action: ChangeAction::Create,
+                diff: String::new(),
+                new_content: Some(violating_content.to_string()),
+            }],
+        };
+
+        let plan_path = temp_vault.path().join("bad_plan.json");
+        fs::write(&plan_path, serde_json::to_string_pretty(&plan)?)?;
+
+        // 1. Run CLI akashic vault apply with the plan
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"));
+        if let Some(ref cfg_path) = config_arg {
+            cmd.args(["--config", cfg_path.to_str().unwrap()]);
+        }
+        cmd.args([
+            "vault",
+            "apply",
+            vault_path.to_str().unwrap(),
+            "--plan",
+            plan_path.to_str().unwrap(),
+        ]);
+
+        let output = cmd.output()?;
+        assert!(
+            !output.status.success(),
+            "CLI apply should have failed for rule {}",
+            rule_code
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(rule_code),
+            "stderr for rule {} must contain rule code, got: {}",
+            rule_code,
+            stderr
+        );
+
+        // 2. Also verify programmatic API behaves identically
+        let loaded_config = config_str.and_then(|s| akashic_core::AkashicConfig::from_toml_str(s).ok());
+        let prog_res = akashic_core::vault_apply(
+            vault_path,
+            Some(plan_path.as_path()),
+            loaded_config.as_ref(),
+        );
+        assert!(
+            prog_res.is_err(),
+            "Programmatic apply should fail for rule {}",
+            rule_code
+        );
+        let prog_err = prog_res.unwrap_err().to_string();
+        assert!(
+            prog_err.contains(rule_code),
+            "Programmatic error for rule {} must contain rule code, got: {}",
+            rule_code,
+            prog_err
+        );
+
+        // 3. Verify atomic abort guarantees:
+        // - disk content of target.md is completely untouched
+        let current_target = fs::read_to_string(vault_path.join("target.md"))?;
+        assert_eq!(
+            current_target, initial_valid,
+            "Target file must not be modified when apply aborts for rule {}",
+            rule_code
+        );
+
+        // - violating file was NOT created on disk
+        assert!(
+            !vault_path.join(file_name).exists(),
+            "Violating file '{}' must not exist on disk for rule {}",
+            file_name,
+            rule_code
+        );
+
+        // - no .akashic/backups directory was created
+        assert!(
+            !vault_path.join(".akashic/backups").exists(),
+            "Backups directory must not exist on disk when apply aborts for rule {}",
+            rule_code
+        );
+    }
+
+    Ok(())
+}
+

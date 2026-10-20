@@ -65,6 +65,8 @@ impl AkashicConfig {
             _ => toml::Table::new(),
         };
 
+        let custom_field_rules = lint::parse_custom_field_rules_from_toml(raw).unwrap_or_default();
+
         if !raw.trim().is_empty() {
             let patch_val: toml::Value = toml::from_str(raw)?;
             if let toml::Value::Table(patch_tab) = patch_val {
@@ -72,8 +74,25 @@ impl AkashicConfig {
             }
         }
 
+        if let Some(toml::Value::Table(lint_tab)) = default_tab.get_mut("lint") {
+            if let Some(toml::Value::Table(cf_tab)) = lint_tab.get_mut("custom_fields") {
+                cf_tab.retain(|_, v| matches!(v, toml::Value::String(_)));
+            }
+        }
+
         let merged_val = toml::Value::Table(default_tab);
-        let config: Self = merged_val.try_into()?;
+        let mut config: Self = merged_val.try_into()?;
+
+        config.lint.custom_field_rules = custom_field_rules;
+        for (k, v) in &config.lint.custom_fields {
+            config.lint.custom_field_rules.entry(k.clone()).or_insert_with(|| {
+                lint::CustomFieldRule {
+                    field_type: v.clone(),
+                    ..Default::default()
+                }
+            });
+        }
+
         Ok(config)
     }
 
@@ -144,6 +163,104 @@ impl CliRuntimeContext {
             DEFAULT_REPO_NAME
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Vault Plan & Apply Orchestration Gate
+// ---------------------------------------------------------------------------
+
+pub fn collect_custom_field_rules(
+    root: &Path,
+    config: Option<&AkashicConfig>,
+) -> std::collections::BTreeMap<String, lint::CustomFieldRule> {
+    let mut rules = config
+        .map(|c| {
+            let mut r = c.lint.custom_field_rules.clone();
+            for (k, v) in &c.lint.custom_fields {
+                r.entry(k.clone()).or_insert_with(|| lint::CustomFieldRule {
+                    field_type: v.clone(),
+                    ..Default::default()
+                });
+            }
+            r
+        })
+        .unwrap_or_default();
+
+    let mut candidates = vec![
+        root.join("akashic.toml"),
+        root.join("config/akashic.toml"),
+    ];
+    if let Some(parent) = root.parent() {
+        candidates.push(parent.join("akashic.toml"));
+        candidates.push(parent.join("config/akashic.toml"));
+    }
+
+    for candidate in candidates {
+        if candidate.exists() && candidate.is_file() {
+            if let Ok(raw) = std::fs::read_to_string(&candidate) {
+                if let Ok(file_rules) = lint::parse_custom_field_rules_from_toml(&raw) {
+                    for (k, rule) in file_rules {
+                        rules.entry(k).or_insert(rule);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    rules
+}
+
+pub fn vault_apply_plan_with_config(
+    root: &Path,
+    plan: &vault::migrator::MigrationPlan,
+    config: Option<&AkashicConfig>,
+) -> anyhow::Result<usize> {
+    let count = vault::migrator::apply_plan_with_validator(root, plan, |preview_graph| {
+        let custom_rules = collect_custom_field_rules(root, config);
+        let report = lint::lint_vault_with_rules(preview_graph, &custom_rules);
+        if !report.valid || report.error_count > 0 {
+            let diagnostics: Vec<String> = report
+                .issues
+                .iter()
+                .filter(|i| i.severity == lint::Severity::Error)
+                .map(|i| format!("[{}] {}: {}", i.severity, i.code, i.message))
+                .collect();
+            return Err(vault::VaultError::Migration(format!(
+                "Pre-apply lint gate failed with {} error(s):\n{}",
+                report.error_count,
+                diagnostics.join("\n")
+            )));
+        }
+        Ok(())
+    })?;
+    Ok(count)
+}
+
+pub fn vault_apply_plan(
+    root: &Path,
+    plan: &vault::migrator::MigrationPlan,
+) -> anyhow::Result<usize> {
+    vault_apply_plan_with_config(root, plan, None)
+}
+
+pub fn vault_apply(
+    root: &Path,
+    plan_path: Option<&Path>,
+    config: Option<&AkashicConfig>,
+) -> anyhow::Result<usize> {
+    let plan_file = match plan_path {
+        Some(p) if !p.as_os_str().is_empty() && !p.to_string_lossy().trim().is_empty() => p,
+        _ => {
+            anyhow::bail!(
+                "Missing required `--plan <path>` argument. Direct implicit vault mutation is prohibited; run `akashic vault plan --output <plan.json>` first, then execute `akashic vault apply --plan <plan.json>`."
+            );
+        }
+    };
+
+    let plan_json = std::fs::read_to_string(plan_file)?;
+    let plan: vault::migrator::MigrationPlan = serde_json::from_str(&plan_json)?;
+    vault_apply_plan_with_config(root, &plan, config)
 }
 
 #[derive(Parser, Debug, PartialEq)]
@@ -243,10 +360,18 @@ impl VaultInspectArgs {
 
 #[derive(Args, Debug, PartialEq, Default)]
 pub struct VaultPlanArgs {
-    #[arg(long)]
+    #[arg(long, alias = "output", short = 'o')]
     pub out: Option<String>,
     #[arg(long)]
     pub path: Option<String>,
+    #[arg(value_name = "VAULT_PATH")]
+    pub positional_path: Option<String>,
+}
+
+impl VaultPlanArgs {
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref().or(self.positional_path.as_deref())
+    }
 }
 
 #[derive(Args, Debug, PartialEq, Default)]
@@ -255,6 +380,14 @@ pub struct VaultApplyArgs {
     pub plan: Option<String>,
     #[arg(long)]
     pub path: Option<String>,
+    #[arg(value_name = "VAULT_PATH")]
+    pub positional_path: Option<String>,
+}
+
+impl VaultApplyArgs {
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref().or(self.positional_path.as_deref())
+    }
 }
 
 #[derive(Args, Debug, PartialEq, Default)]

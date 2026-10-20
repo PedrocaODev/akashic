@@ -2,7 +2,7 @@
 id: wayfinder-map
 title: "OEM Android Knowledge & RCA Infrastructure"
 label: "wayfinder:map"
-status: completed
+status: active
 ---
 
 # Wayfinder Map: OEM Android Knowledge & RCA Infrastructure
@@ -33,11 +33,14 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 
 ## Frontier (Unblocked)
 
-*(None)*
+- [15 — Unified CLI Context Prefactor and Vault Node Terminology Alignment](tickets/15-unified-cli-context-prefactor-and-vault-node-terminology.md) (`ready-for-agent`)
+- [17 — `sqlite-vec` Virtual Table Persistence and Threshold-Faithful Inferred Code Edges](tickets/17-sqlite-vec-virtual-tables-and-inferred-code-edges.md) (`ready-for-agent`)
+- [18 — Betweenness Centrality God Nodes, File-Bucketed Graph Communities, and Bounded Top-K Analytics](tickets/18-betweenness-centrality-god-nodes-and-bounded-graph-analytics.md) (`ready-for-agent`)
+- [19 — $O(\log N)$ Symbol Store LRU Cache Eviction and Min-Heap Adaptive Debouncer](tickets/19-logarithmic-symbol-cache-lru-and-min-heap-debouncer.md) (`ready-for-agent`)
 
 ## Blocked
 
-*(None)*
+- [16 — Strict Plan-Then-Apply Vault Mutation and Pre-Apply Lint Gate](tickets/16-strict-plan-then-apply-vault-mutation-and-lint-gate.md) (`ready-for-agent`, blocked by 15)
 
 ## Completed
 
@@ -56,4 +59,4 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - [13 — `akashic-cli` and `graphify` Skills Clean-Slate Overhaul](tickets/13-akashic-cli-and-graphify-skills-clean-slate-overhaul.md) (`done`)
 - [14 — Global `GEMINI.md` and Specialist Agent Rules Alignment](tickets/14-global-gemini-md-and-specialist-agent-rules-alignment.md) (`done`)
 
-*(Note: All tickets 01–14 across Stage 1 and Stage 2 are complete.)*
+*(Note: Stage 1 & 2 tickets 01–14 are complete. Stage 3 remediation tickets 15–19 are queued.)*

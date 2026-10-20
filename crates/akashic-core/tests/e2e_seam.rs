@@ -364,11 +364,43 @@ Auth header: Bearer abcdef1234567890abcdef
 
     assert_eq!(expected_tools.len(), 17, "Must verify exactly 17 tools");
     for tool_name in &expected_tools {
-        assert!(
-            mcp_server.get_tool(tool_name).is_some(),
-            "MCP server must provide tool '{}'",
-            tool_name
-        );
+        let tool = mcp_server
+            .get_tool(tool_name)
+            .unwrap_or_else(|| panic!("MCP server must provide tool '{}'", tool_name));
+        let props = tool
+            .input_schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .unwrap_or_else(|| panic!("Tool '{}' input_schema must have 'properties' object", tool_name));
+        for (prop_name, prop_schema) in props {
+            let prop_obj = prop_schema
+                .as_object()
+                .unwrap_or_else(|| panic!("Tool '{}' property '{}' must be an object", tool_name, prop_name));
+            let ty = prop_obj.get("type").and_then(|v| v.as_str());
+            assert!(
+                ty.is_some(),
+                "Tool '{}' property '{}' must have a string 'type' field for Vertex AI functionDeclaration compatibility, got: {:?}",
+                tool_name,
+                prop_name,
+                prop_obj.get("type")
+            );
+            assert!(
+                !prop_obj.get("default").is_some_and(|v| v.is_null()),
+                "Tool '{}' property '{}' must not have 'default: null'",
+                tool_name,
+                prop_name
+            );
+            assert!(
+                !prop_obj
+                    .get("format")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|f| matches!(f, "uint" | "uint32" | "uint64")),
+                "Tool '{}' property '{}' must not use non-standard integer format {:?}",
+                tool_name,
+                prop_name,
+                prop_obj.get("format")
+            );
+        }
     }
 
     Ok(())

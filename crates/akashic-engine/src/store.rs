@@ -198,6 +198,13 @@ impl GraphStore {
                 cohesion_score REAL NOT NULL,
                 node_count INTEGER NOT NULL
             );
+
+            CREATE INDEX IF NOT EXISTS idx_code_symbols_repo ON code_symbols(repo_name);
+            CREATE INDEX IF NOT EXISTS idx_code_symbols_file ON code_symbols(repo_name, file_path);
+            CREATE INDEX IF NOT EXISTS idx_code_edges_target ON code_edges(target_id);
+            CREATE INDEX IF NOT EXISTS idx_code_edges_source ON code_edges(source_id);
+            CREATE INDEX IF NOT EXISTS idx_code_edges_tier ON code_edges(confidence_tier);
+            CREATE INDEX IF NOT EXISTS idx_symbol_embeddings_repo ON symbol_embeddings(repo_name);
             "#
         )?;
         Ok(())
@@ -375,6 +382,64 @@ impl GraphStore {
         Ok(())
     }
 
+    pub fn upsert_symbols_batch(&self, symbols: &[CodeSymbol]) -> Result<()> {
+        if symbols.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut del_fts_stmt = tx.prepare("DELETE FROM symbol_fts WHERE id = ?1")?;
+            let mut insert_sym_stmt = tx.prepare(
+                "INSERT INTO code_symbols (id, repo_name, file_path, symbol_name, kind, signature, visibility, start_line, end_line, doc_comment, community_id, commit_sha)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(id) DO UPDATE SET
+                    repo_name=excluded.repo_name,
+                    file_path=excluded.file_path,
+                    symbol_name=excluded.symbol_name,
+                    kind=excluded.kind,
+                    signature=excluded.signature,
+                    visibility=excluded.visibility,
+                    start_line=excluded.start_line,
+                    end_line=excluded.end_line,
+                    doc_comment=excluded.doc_comment,
+                    community_id=excluded.community_id,
+                    commit_sha=excluded.commit_sha",
+            )?;
+            let mut insert_fts_stmt = tx.prepare(
+                "INSERT INTO symbol_fts (id, repo_name, symbol_name, signature, doc_comment, file_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+
+            for sym in symbols {
+                del_fts_stmt.execute(params![sym.id])?;
+                insert_sym_stmt.execute(params![
+                    sym.id,
+                    sym.repo_name,
+                    sym.file_path,
+                    sym.symbol_name,
+                    sym.kind,
+                    sym.signature,
+                    sym.visibility,
+                    sym.start_line,
+                    sym.end_line,
+                    sym.doc_comment,
+                    sym.community_id,
+                    sym.commit_sha
+                ])?;
+                insert_fts_stmt.execute(params![
+                    sym.id,
+                    sym.repo_name,
+                    sym.symbol_name,
+                    sym.signature,
+                    sym.doc_comment,
+                    sym.file_path
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_symbol_by_id(&self, id: &str) -> Result<Option<CodeSymbol>> {
         let mut stmt = self.conn.prepare("SELECT id, repo_name, file_path, symbol_name, kind, signature, visibility, start_line, end_line, doc_comment, community_id, commit_sha FROM code_symbols WHERE id = ?1")?;
         let sym = stmt.query_row(params![id], Self::row_to_symbol).optional()?;
@@ -445,6 +510,35 @@ impl GraphStore {
                 evidence=excluded.evidence",
             params![edge.source_id, edge.target_id, edge.edge_type, edge.confidence_tier.as_str(), edge.confidence_score, edge.evidence],
         )?;
+        Ok(())
+    }
+
+    pub fn upsert_edges_batch(&self, edges: &[CodeEdge]) -> Result<()> {
+        if edges.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut insert_edge_stmt = tx.prepare(
+                "INSERT INTO code_edges (source_id, target_id, edge_type, confidence_tier, confidence_score, evidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(source_id, target_id, edge_type) DO UPDATE SET
+                    confidence_tier=excluded.confidence_tier,
+                    confidence_score=excluded.confidence_score,
+                    evidence=excluded.evidence",
+            )?;
+            for edge in edges {
+                insert_edge_stmt.execute(params![
+                    edge.source_id,
+                    edge.target_id,
+                    edge.edge_type,
+                    edge.confidence_tier.as_str(),
+                    edge.confidence_score,
+                    edge.evidence
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 

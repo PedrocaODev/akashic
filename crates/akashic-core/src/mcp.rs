@@ -91,7 +91,31 @@ fn parse_scope(scope_str: Option<&str>) -> Scope {
 // Tool parameter schemas
 // ---------------------------------------------------------------------------
 
+fn normalize_tool_schema(schema: &mut schemars::Schema) {
+    if let Some(obj) = schema.as_object_mut() {
+        if let Some(serde_json::Value::Array(types)) = obj.get_mut("type") {
+            types.retain(|t| t.as_str() != Some("null"));
+            if types.len() == 1 {
+                let single = types.remove(0);
+                obj.insert("type".to_string(), single);
+            }
+        }
+        if obj.get("default").is_some_and(|v| v.is_null()) {
+            obj.remove("default");
+        }
+        if obj
+            .get("format")
+            .and_then(|v| v.as_str())
+            .is_some_and(|f| matches!(f, "uint" | "uint32" | "uint64"))
+        {
+            obj.remove("format");
+        }
+    }
+    schemars::transform::transform_subschemas(&mut normalize_tool_schema, schema);
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct VaultQueryParams {
     pub mode: String,
     #[serde(default)]
@@ -101,11 +125,13 @@ pub struct VaultQueryParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct VaultInspectParams {
     pub note_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct VaultLintParams {
     #[serde(default)]
     pub path: Option<String>,
@@ -114,11 +140,13 @@ pub struct VaultLintParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct VaultReadParams {
     pub note_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct VaultWriteCanonicalParams {
     pub note_id: String,
     pub title: String,
@@ -129,6 +157,7 @@ pub struct VaultWriteCanonicalParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphQueryParams {
     pub query: String,
     #[serde(default)]
@@ -138,11 +167,13 @@ pub struct GraphQueryParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphGetNodeParams {
     pub node_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphGetNeighborsParams {
     pub node_id: String,
     #[serde(default)]
@@ -150,12 +181,14 @@ pub struct GraphGetNeighborsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphGetCommunityParams {
     #[serde(default)]
     pub community_id: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphGodNodesParams {
     #[serde(default)]
     pub repo_name: Option<String>,
@@ -164,18 +197,21 @@ pub struct GraphGodNodesParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphStatsParams {
     #[serde(default)]
     pub repo_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphShortestPathParams {
     pub source: String,
     pub target: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct GraphBlastRadiusParams {
     pub target: String,
     #[serde(default)]
@@ -183,23 +219,27 @@ pub struct GraphBlastRadiusParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct RcaStatusParams {
     pub investigation_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct RcaTriggerParams {
     pub app_id: String,
     pub raw_log: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct RcaSymbolicateParams {
     pub app_id: String,
     pub raw_log: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(transform = normalize_tool_schema)]
 pub struct RcaCrystallizeParams {
     pub run_id: String,
     pub summary: String,

@@ -4,9 +4,9 @@
 
 **Blocked by:** 15 — Unified CLI Context Prefactor and Vault Node Terminology Alignment
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `akashic vault apply` requires `--plan <path>` and rejects execution when no **Plan** file is provided, directing the operator to run `akashic vault plan` first.
-- [ ] Applying a **Plan** validates the resulting **Vault Graph** against `akashic-lint` rules (`L001`–`L012`) before writing modified **Vault Nodes** to disk.
-- [ ] If any mutated **Vault Node** fails `akashic-lint` validation, `akashic vault apply` aborts without modifying files on disk and reports the offending lint diagnostics.
-- [ ] End-to-end tests verify both successful two-step **Plan** application and atomic rejection when a **Plan** introduces a lint violation.
+- [x] `akashic vault apply` requires `--plan <path>` and rejects execution when no **Plan** file is provided, directing the operator to run `akashic vault plan` first.
+- [x] Applying a **Plan** validates the resulting **Vault Graph** against `akashic-lint` rules (`L001`–`L012`) before writing modified **Vault Nodes** to disk.
+- [x] If any mutated **Vault Node** fails `akashic-lint` validation, `akashic vault apply` aborts without modifying files on disk and reports the offending lint diagnostics.
+- [x] End-to-end tests verify both successful two-step **Plan** application and atomic rejection when a **Plan** introduces a lint violation.

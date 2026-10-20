@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `akashic` loads `--config` (defaulting to `config/akashic.toml` when present) once before subcommand dispatch and supplies resolved paths for `vault_index.db`, `code_graph.db`, and `rca_state.db` to all domain subcommands.
-- [ ] `akashic vault query` and `akashic vault inspect` accept `--node-id` (with `node_id` field names) and emit `"Vault Node '<id>' not found"` instead of using avoided `Note` or `Document` terms.
-- [ ] `akashic graph` read subcommands (`god-nodes`, `communities`, `path`, `surprising`, `blast-radius`, `report`, `wiki`) resolve the configured or default repository name when `--repo-name` is omitted instead of querying an empty string `""`.
-- [ ] CLI unit and integration tests verify shared configuration loading and **Vault Node** error output.
+- [x] `akashic` loads `--config` (defaulting to `config/akashic.toml` when present) once before subcommand dispatch and supplies resolved paths for `vault_index.db`, `code_graph.db`, and `rca_state.db` to all domain subcommands.
+- [x] `akashic vault query` and `akashic vault inspect` accept `--node-id` (with `node_id` field names) and emit `"Vault Node '<id>' not found"` instead of using avoided `Note` or `Document` terms.
+- [x] `akashic graph` read subcommands (`god-nodes`, `communities`, `path`, `surprising`, `blast-radius`, `report`, `wiki`) resolve the configured or default repository name when `--repo-name` is omitted instead of querying an empty string `""`.
+- [x] CLI unit and integration tests verify shared configuration loading and **Vault Node** error output.

@@ -4,11 +4,11 @@
 
 **Blocked by:** 02 — Profile-Driven Sanitization Slice, 03 — Local Embedding Sidecar and Provider Slice
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Non-destructive Git ingestion reads commit trees and file blobs directly via `gix` without modifying developer worktree state or acquiring index locks.
-- [ ] Tree-sitter AST extractors parse declarations, methods, classes, and calls across Java, Kotlin, C++, Rust, Python, Go, and TypeScript with deterministic unique symbol IDs.
-- [ ] Code edges record explicit `Edge Provenance` (`EXTRACTED` for AST relations, `INFERRED` for embedding similarity, `AMBIGUOUS` for unresolved calls).
-- [ ] Structural Significance Filter distinguishes public API and architectural changes from internal method-body statement revisions.
-- [ ] `.akashic/code_graph.db` persists symbols and edges alongside SQLite FTS5 BM25 text indices and `sqlite-vec` embeddings with Reciprocal Rank Fusion (RRF) hybrid search.
-- [ ] Code indexing executes with zero LLM calls during indexing, meeting sub-minute benchmarks for large codebases.
+- [x] Non-destructive Git ingestion reads commit trees and file blobs directly via `gix` without modifying developer worktree state or acquiring index locks.
+- [x] Tree-sitter AST extractors parse declarations, methods, classes, and calls across Java, Kotlin, C++, Rust, Python, Go, and TypeScript with deterministic unique symbol IDs.
+- [x] Code edges record explicit `Edge Provenance` (`EXTRACTED` for AST relations, `INFERRED` for embedding similarity, `AMBIGUOUS` for unresolved calls).
+- [x] Structural Significance Filter distinguishes public API and architectural changes from internal method-body statement revisions.
+- [x] `.akashic/code_graph.db` persists symbols and edges alongside SQLite FTS5 BM25 text indices and `sqlite-vec` embeddings with Reciprocal Rank Fusion (RRF) hybrid search.
+- [x] Code indexing executes with zero LLM calls during indexing, meeting sub-minute benchmarks for large codebases.

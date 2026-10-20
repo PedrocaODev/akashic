@@ -4,10 +4,10 @@
 
 **Blocked by:** 02 — Profile-Driven Sanitization Slice, 03 — Local Embedding Sidecar and Provider Slice
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Parser reads OKF v0.2 Markdown files and preserves arbitrary custom YAML frontmatter attributes via `#[serde(flatten)]` without data loss on serialization.
-- [ ] Forward-only relation graph traversals power four query modes: `current` (resolves active guidance), `lineage` (traces historical supersession chains), `impact` (identifies dependent nodes), and `historical` (evaluates point-in-time state).
-- [ ] Graph engine detects supersession cycles and competing active successors, strictly abstains from guessing winners, and marks branches as `Unresolved Conflict`.
-- [ ] Mutation planner implements `akashic vault plan` (emits reviewable diff) and `akashic vault apply` (atomically commits valid updates).
-- [ ] SQLite `vault_index.db` caches parsed node metadata, relations, and FTS5 search indexes under `.akashic/`, reconstructible from scratch via `akashic vault reindex`.
+- [x] Parser reads OKF v0.2 Markdown files and preserves arbitrary custom YAML frontmatter attributes via `#[serde(flatten)]` without data loss on serialization.
+- [x] Forward-only relation graph traversals power four query modes: `current` (resolves active guidance), `lineage` (traces historical supersession chains), `impact` (identifies dependent nodes), and `historical` (evaluates point-in-time state).
+- [x] Graph engine detects supersession cycles and competing active successors, strictly abstains from guessing winners, and marks branches as `Unresolved Conflict`.
+- [x] Mutation planner implements `akashic vault plan` (emits reviewable diff) and `akashic vault apply` (atomically commits valid updates).
+- [x] SQLite `vault_index.db` caches parsed node metadata, relations, and FTS5 search indexes under `.akashic/`, reconstructible from scratch via `akashic vault reindex`.

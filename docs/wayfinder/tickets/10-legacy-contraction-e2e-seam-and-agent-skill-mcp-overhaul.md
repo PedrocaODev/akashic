@@ -4,11 +4,11 @@
 
 **Blocked by:** 05 — Knowledge Graph Linter and Custom Schema Rules Slice, 07 — Graph Communities, God Nodes, Blast Radius, and Report Slice, 08 — Host-Native RCA Conductor, Symbolication, and Crystallization Slice, 09 — Gerrit Stream Daemon, Debounce, and Auto-Discovery Slice
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Unified `akashic` CLI binary in `akashic-core` dispatches all domain subcommands (`vault`, `lint`, `graph`, `rca`, `daemon`, `embedding`, `sanitize`, `mcp`) from a single executable.
-- [ ] Unified `rmcp` MCP server exposes namespaced tools (`vault_*`, `graph_*`, `rca_*`) over standard I/O with structured JSON schemas and graceful fallback when embedding sidecars are offline.
-- [ ] Legacy binaries, obsolete helper scripts, and legacy crate adapters from `alexandria`, `akashic-records`, and `knowledge-base` are completely removed.
-- [ ] End-to-end integration test seam (`test_e2e_akashic_pipeline`) passes against a multi-language fixture repository, verifying non-destructive Git ingestion, sanitization, community clustering, blast radius, RCA deduplication, and lint-gated crystallization.
-- [ ] Persistence isolation is verified by deleting `code_graph.db` and `vault_index.db` and asserting full reconstruction while `rca_state.db` checkpoints remain intact.
-- [ ] Agent skill definitions and MCP configuration presets are updated to point to `akashic mcp`.
+- [x] Unified `akashic` CLI binary in `akashic-core` dispatches all domain subcommands (`vault`, `lint`, `graph`, `rca`, `daemon`, `embedding`, `sanitize`, `mcp`) from a single executable.
+- [x] Unified `rmcp` MCP server exposes namespaced tools (`vault_*`, `graph_*`, `rca_*`) over standard I/O with structured JSON schemas and graceful fallback when embedding sidecars are offline.
+- [x] Legacy binaries, obsolete helper scripts, and legacy crate adapters from `alexandria`, `akashic-records`, and `knowledge-base` are completely removed.
+- [x] End-to-end integration test seam (`test_e2e_akashic_pipeline`) passes against a multi-language fixture repository, verifying non-destructive Git ingestion, sanitization, community clustering, blast radius, RCA deduplication, and lint-gated crystallization.
+- [x] Persistence isolation is verified by deleting `code_graph.db` and `vault_index.db` and asserting full reconstruction while `rca_state.db` checkpoints remain intact.
+- [x] Agent skill definitions and MCP configuration presets are updated to point to `akashic mcp`.

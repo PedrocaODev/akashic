@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Root `Cargo.toml` configures a unified Cargo workspace containing all 8 crates under `crates/` with unified dependencies (Tokio, rusqlite, serde, gix, tree-sitter, rmcp).
-- [ ] The 8 crates (`akashic-sanitize`, `akashic-embedding`, `akashic-vault`, `akashic-lint`, `akashic-engine`, `akashic-rca`, `akashic-daemon`, `akashic-core`) compile cleanly with zero circular dependencies adhering to ADR 0001.
-- [ ] Root `akashic.toml` configuration template is established defining database paths under `.akashic/` (`code_graph.db`, `rca_state.db`, `vault_index.db`), sanitization profiles, lint rules, and daemon thresholds.
-- [ ] `cargo check --workspace` and `cargo test --workspace` execute without error on the baseline scaffold.
+- [x] Root `Cargo.toml` configures a unified Cargo workspace containing all 8 crates under `crates/` with unified dependencies (Tokio, rusqlite, serde, gix, tree-sitter, rmcp).
+- [x] The 8 crates (`akashic-sanitize`, `akashic-embedding`, `akashic-vault`, `akashic-lint`, `akashic-engine`, `akashic-rca`, `akashic-daemon`, `akashic-core`) compile cleanly with zero circular dependencies adhering to ADR 0001.
+- [x] Root `akashic.toml` configuration template is established defining database paths under `.akashic/` (`code_graph.db`, `rca_state.db`, `vault_index.db`), sanitization profiles, lint rules, and daemon thresholds.
+- [x] `cargo check --workspace` and `cargo test --workspace` execute without error on the baseline scaffold.

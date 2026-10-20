@@ -33,16 +33,23 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 
 ## Frontier (Unblocked)
 
-- [01 — Three-Repo Merge and Eight-Crate Workspace Prefactor](tickets/01-three-repo-merge-and-eight-crate-workspace-prefactor.md) (`ready-for-agent`): Consolidate the codebase structure of `akashic-records`, `alexandria`, and `knowledge-base` into a unified Rust Cargo workspace rooted in this repository with 8 scaffolded crates under `crates/`.
+- [12 — Unified `akashic mcp` Server Registration and Tool Schema Cutover](tickets/12-unified-akashic-mcp-server-registration-and-schema-cutover.md) (`ready-for-agent`)
 
 ## Blocked
 
-- [02 — Profile-Driven Sanitization Slice](tickets/02-profile-driven-sanitization-slice.md) (`ready-for-agent`) — *Blocked by: 01*
-- [03 — Local Embedding Sidecar and Provider Slice](tickets/03-local-embedding-sidecar-and-provider-slice.md) (`ready-for-agent`) — *Blocked by: 01*
-- [04 — OKF v0.2 Vault Graph, Custom Fields, and Vault Index Slice](tickets/04-okf-v02-vault-graph-custom-fields-and-vault-index-slice.md) (`ready-for-agent`) — *Blocked by: 02, 03*
-- [05 — Knowledge Graph Linter and Custom Schema Rules Slice](tickets/05-knowledge-graph-linter-and-custom-schema-rules-slice.md) (`ready-for-agent`) — *Blocked by: 04*
-- [06 — Multi-Language AST Code Graph, Gix, and Hybrid Search Slice](tickets/06-multi-language-ast-code-graph-gix-and-hybrid-search-slice.md) (`ready-for-agent`) — *Blocked by: 02, 03*
-- [07 — Graph Communities, God Nodes, Blast Radius, and Report Slice](tickets/07-graph-communities-god-nodes-blast-radius-and-report-slice.md) (`ready-for-agent`) — *Blocked by: 06*
-- [08 — Host-Native RCA Conductor, Symbolication, and Crystallization Slice](tickets/08-host-native-rca-conductor-symbolication-and-crystallization-slice.md) (`ready-for-agent`) — *Blocked by: 04, 05, 06*
-- [09 — Gerrit Stream Daemon, Debounce, and Auto-Discovery Slice](tickets/09-gerrit-stream-daemon-debounce-and-auto-discovery-slice.md) (`ready-for-agent`) — *Blocked by: 07, 08*
-- [10 — Legacy Contraction, E2E Seam, and Agent Skill MCP Overhaul](tickets/10-legacy-contraction-e2e-seam-and-agent-skill-mcp-overhaul.md) (`ready-for-agent`) — *Blocked by: 05, 07, 08, 09*
+- [13 — `akashic-cli` and `graphify` Skills Clean-Slate Overhaul](tickets/13-akashic-cli-and-graphify-skills-clean-slate-overhaul.md) (`ready-for-agent`) — *Blocked by: 12*
+- [14 — Global `GEMINI.md` and Specialist Agent Rules Alignment](tickets/14-global-gemini-md-and-specialist-agent-rules-alignment.md) (`ready-for-agent`) — *Blocked by: 12, 13*
+
+## Completed
+
+- [01 — Three-Repo Merge and Eight-Crate Workspace Prefactor](tickets/01-three-repo-merge-and-eight-crate-workspace-prefactor.md) (`done`)
+- [02 — Profile-Driven Sanitization Slice](tickets/02-profile-driven-sanitization-slice.md) (`done`)
+- [03 — Local Embedding Sidecar and Provider Slice](tickets/03-local-embedding-sidecar-and-provider-slice.md) (`done`)
+- [04 — OKF v0.2 Vault Graph, Custom Fields, and Vault Index Slice](tickets/04-okf-v02-vault-graph-custom-fields-and-vault-index-slice.md) (`done`)
+- [05 — Knowledge Graph Linter and Custom Schema Rules Slice](tickets/05-knowledge-graph-linter-and-custom-schema-rules-slice.md) (`done`)
+- [06 — Multi-Language AST Code Graph, Gix, and Hybrid Search Slice](tickets/06-multi-language-ast-code-graph-gix-and-hybrid-search-slice.md) (`done`)
+- [07 — Graph Communities, God Nodes, Blast Radius, and Report Slice](tickets/07-graph-communities-god-nodes-blast-radius-and-report-slice.md) (`done`)
+- [08 — Host-Native RCA Conductor, Symbolication, and Crystallization Slice](tickets/08-host-native-rca-conductor-symbolication-and-crystallization-slice.md) (`done`)
+- [09 — Gerrit Stream Daemon, Debounce, and Auto-Discovery Slice](tickets/09-gerrit-stream-daemon-debounce-and-auto-discovery-slice.md) (`done`)
+- [10 — Legacy Contraction, E2E Seam, and Agent Skill MCP Overhaul](tickets/10-legacy-contraction-e2e-seam-and-agent-skill-mcp-overhaul.md) (`done`)
+- [11 — Unified `akashic` Binary Installation and Legacy Binary Retirement](tickets/11-unified-akashic-binary-installation-and-legacy-retirement.md) (`done`)

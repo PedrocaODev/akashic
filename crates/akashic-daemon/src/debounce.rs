@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
 use crate::events::{should_process_event, GerritStreamEvent, SELF_TRIGGER_PREFIX};
@@ -33,20 +34,24 @@ impl PendingProjectBatch {
     }
 }
 
-pub struct DebounceQueue {
+pub struct AdaptiveDebouncer {
     quiet_window: Duration,
     max_wait_cap: Duration,
     loop_drop_prefix: String,
     pending: HashMap<String, PendingProjectBatch>,
+    deadlines: BinaryHeap<Reverse<(Instant, String)>>,
 }
 
-impl DebounceQueue {
+pub type DebounceQueue = AdaptiveDebouncer;
+
+impl AdaptiveDebouncer {
     pub fn new(quiet_window: Duration, max_wait_cap: Duration) -> Self {
         Self {
             quiet_window,
             max_wait_cap,
             loop_drop_prefix: SELF_TRIGGER_PREFIX.to_string(),
             pending: HashMap::new(),
+            deadlines: BinaryHeap::new(),
         }
     }
 
@@ -80,7 +85,7 @@ impl DebounceQueue {
         let change_id = event.change_id.clone();
         let timestamp = event.event_created_on;
 
-        if let Some(batch) = self.pending.get_mut(&project) {
+        let effective_deadline = if let Some(batch) = self.pending.get_mut(&project) {
             batch.last_event_at = now;
             let proposed_quiet = now + self.quiet_window;
             batch.quiet_deadline = proposed_quiet.min(batch.max_cap_deadline);
@@ -99,58 +104,79 @@ impl DebounceQueue {
                 );
             }
             batch.events.push(event);
+            batch.effective_deadline()
         } else {
             let max_cap_deadline = now + self.max_wait_cap;
             let quiet_deadline = (now + self.quiet_window).min(max_cap_deadline);
 
-            self.pending.insert(
-                project.clone(),
-                PendingProjectBatch {
-                    project,
-                    first_event_at: now,
-                    last_event_at: now,
-                    quiet_deadline,
-                    max_cap_deadline,
-                    events: vec![event],
-                    latest_revision: revision,
-                    latest_change_id: change_id,
-                    latest_timestamp: timestamp,
-                },
-            );
-        }
+            let batch = PendingProjectBatch {
+                project: project.clone(),
+                first_event_at: now,
+                last_event_at: now,
+                quiet_deadline,
+                max_cap_deadline,
+                events: vec![event],
+                latest_revision: revision,
+                latest_change_id: change_id,
+                latest_timestamp: timestamp,
+            };
+            let dl = batch.effective_deadline();
+            self.pending.insert(project.clone(), batch);
+            dl
+        };
 
+        self.deadlines.push(Reverse((effective_deadline, project)));
         true
     }
 
     pub fn pop_ready(&mut self, now: Instant) -> Vec<CoalescedProjectBatch> {
-        let mut ready_projects = Vec::new();
-        for (project, batch) in &self.pending {
-            if now >= batch.effective_deadline() {
-                ready_projects.push(project.clone());
+        if self
+            .deadlines
+            .peek()
+            .is_none_or(|Reverse((deadline, _))| *deadline > now)
+        {
+            return Vec::new();
+        }
+
+        let mut ready_batches = Vec::new();
+        while let Some(Reverse((deadline, _))) = self.deadlines.peek() {
+            if *deadline > now {
+                break;
+            }
+            let Reverse((deadline, project)) = self.deadlines.pop().unwrap();
+            if let Some(batch) = self.pending.get(&project) {
+                if batch.effective_deadline() == deadline {
+                    let batch = self.pending.remove(&project).unwrap();
+                    ready_batches.push(CoalescedProjectBatch {
+                        project: batch.project,
+                        first_event_at: batch.first_event_at,
+                        last_event_at: batch.last_event_at,
+                        events: batch.events,
+                        latest_revision: batch.latest_revision,
+                        latest_change_id: batch.latest_change_id,
+                        latest_timestamp: batch.latest_timestamp,
+                    });
+                }
             }
         }
 
-        ready_projects.sort();
-
-        let mut ready_batches = Vec::with_capacity(ready_projects.len());
-        for project in ready_projects {
-            if let Some(batch) = self.pending.remove(&project) {
-                ready_batches.push(CoalescedProjectBatch {
-                    project: batch.project,
-                    first_event_at: batch.first_event_at,
-                    last_event_at: batch.last_event_at,
-                    events: batch.events,
-                    latest_revision: batch.latest_revision,
-                    latest_change_id: batch.latest_change_id,
-                    latest_timestamp: batch.latest_timestamp,
-                });
-            }
+        if self.pending.is_empty() {
+            self.deadlines.clear();
         }
 
         ready_batches
     }
 
     pub fn next_deadline(&self) -> Option<Instant> {
+        if let Some(Reverse((deadline, project))) = self.deadlines.peek() {
+            if self
+                .pending
+                .get(project)
+                .is_some_and(|b| b.effective_deadline() == *deadline)
+            {
+                return Some(*deadline);
+            }
+        }
         self.pending
             .values()
             .map(|b| b.effective_deadline())
@@ -304,5 +330,82 @@ mod tests {
         assert_eq!(popped40.len(), 1);
         assert_eq!(popped40[0].project, "proj-2");
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_adaptive_debouncer_o1_idle_pop_ready_and_sliding() {
+        let start = Instant::now();
+        let mut debouncer = AdaptiveDebouncer::from_secs(30, 300);
+
+        // Idle check on empty debouncer
+        assert!(debouncer.pop_ready(start).is_empty());
+        assert_eq!(debouncer.next_deadline(), None);
+
+        // Push event for proj-a at t=0 (deadline t=30)
+        assert!(debouncer.push_at(dummy_event("proj-a", 1, "rev1"), start));
+        // Push event for proj-b at t=10 (deadline t=40)
+        let t10 = start + Duration::from_secs(10);
+        assert!(debouncer.push_at(dummy_event("proj-b", 2, "rev2"), t10));
+
+        assert_eq!(debouncer.pending_projects(), 2);
+        assert_eq!(debouncer.next_deadline(), Some(start + Duration::from_secs(30)));
+
+        // O(1) idle check before any deadline expires
+        let t20 = start + Duration::from_secs(20);
+        assert!(debouncer.pop_ready(t20).is_empty());
+
+        // Slide proj-a deadline at t=25: new deadline is min(25+30, 300) = 55
+        let t25 = start + Duration::from_secs(25);
+        assert!(debouncer.push_at(dummy_event("proj-a", 3, "rev3"), t25));
+
+        // Earliest deadline is now proj-b at t=40, while proj-a is at t=55
+        assert_eq!(debouncer.next_deadline(), Some(start + Duration::from_secs(40)));
+
+        // At t=35, old deadline of proj-a (30) has passed, but it was slid to 55, and proj-b is at 40
+        let t35 = start + Duration::from_secs(35);
+        // pop_ready should skip stale proj-a(30) and see proj-b(40) > 35, returning empty
+        assert!(debouncer.pop_ready(t35).is_empty());
+        assert_eq!(debouncer.pending_projects(), 2);
+    }
+
+    #[test]
+    fn test_adaptive_debouncer_stale_deadline_handling_and_ordering() {
+        let start = Instant::now();
+        let mut debouncer = AdaptiveDebouncer::from_secs(30, 300);
+
+        // proj-slow pushed at t=0 -> deadline t=30
+        debouncer.push_at(dummy_event("proj-slow", 1, "s1"), start);
+
+        // proj-fast pushed at t=10 -> deadline t=40
+        let t10 = start + Duration::from_secs(10);
+        debouncer.push_at(dummy_event("proj-fast", 2, "f1"), t10);
+
+        // proj-slow pushed again at t=20 -> slides deadline to t=50
+        let t20 = start + Duration::from_secs(20);
+        debouncer.push_at(dummy_event("proj-slow", 3, "s2"), t20);
+
+        // At t=45:
+        // proj-slow's stale deadline (30) is skipped because its effective deadline is 50.
+        // proj-fast's deadline (40) <= 45, so proj-fast pops first!
+        let t45 = start + Duration::from_secs(45);
+        let popped45 = debouncer.pop_ready(t45);
+        assert_eq!(popped45.len(), 1);
+        assert_eq!(popped45[0].project, "proj-fast");
+        assert_eq!(debouncer.pending_projects(), 1);
+
+        // Next deadline is now proj-slow at t=50
+        assert_eq!(debouncer.next_deadline(), Some(start + Duration::from_secs(50)));
+
+        // At t=48: proj-slow not ready
+        let t48 = start + Duration::from_secs(48);
+        assert!(debouncer.pop_ready(t48).is_empty());
+
+        // At t=50: proj-slow pops
+        let t50 = start + Duration::from_secs(50);
+        let popped50 = debouncer.pop_ready(t50);
+        assert_eq!(popped50.len(), 1);
+        assert_eq!(popped50[0].project, "proj-slow");
+        assert_eq!(popped50[0].events.len(), 2);
+        assert!(debouncer.is_empty());
     }
 }

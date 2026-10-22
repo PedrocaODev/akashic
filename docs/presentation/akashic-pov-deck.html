@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" href="data:,">
+  <title>Akashic // POV</title>
+  <style>
+    :root {
+      --bg-canvas: #050507;
+      --bg-surface: #0a0b0f;
+      --bg-card: rgba(18, 20, 27, 0.88);
+      --bg-elevated: #161821;
+      --text-primary: #f7f8f8;
+      --text-secondary: #d0d6e0;
+      --text-muted: #8a8f98;
+      --border: rgba(255, 255, 255, 0.09);
+      --border-bright: rgba(255, 255, 255, 0.18);
+      --accent: #5e6ad2;
+      --accent-bright: #828fff;
+      --accent-glow: rgba(94, 106, 210, 0.16);
+      --success: #27a644;
+      --warning: #d99b26;
+      --danger: #e5484d;
+      
+      --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Geist Mono', 'SF Mono', ui-monospace, monospace;
+      --slide-scale: 1;
+    }
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background: var(--bg-canvas);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .viewport-shell {
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      background: var(--bg-canvas);
+    }
+
+    .slide-stage {
+      width: 1920px; height: 1080px;
+      transform: scale(var(--slide-scale));
+      transform-origin: center center;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-surface);
+    }
+
+    /* Top and Bottom Bars */
+    .stage-topbar {
+      height: 64px; padding: 0 72px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(11, 12, 16, 0.9);
+      z-index: 30; position: absolute; top: 0; left: 0; width: 100%;
+    }
+    
+    .stage-bottombar {
+      position: absolute; bottom: 0; left: 0; width: 1920px; height: 52px; padding: 0 72px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      background: rgba(11, 12, 16, 0.9);
+      z-index: 30;
+    }
+
+    .topbar-brand { font-family: var(--font-mono); font-size: 15px; font-weight: 600; letter-spacing: 0.1em; color: var(--text-primary); }
+    .topbar-controls { display: flex; gap: 16px; align-items: center; }
+    
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 15px;
+      background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-secondary);
+    }
+    .badge.accent { background: rgba(94, 106, 210, 0.1); border-color: rgba(94, 106, 210, 0.3); color: var(--accent-bright); }
+    .badge.success { background: rgba(39, 166, 68, 0.1); border-color: rgba(39, 166, 68, 0.3); color: var(--success); }
+    
+    select {
+      background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-secondary);
+      padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 15px; outline: none;
+    }
+
+    /* Slide Container & Background */
+    .slide {
+      position: absolute; top: 64px; left: 0; width: 1920px; height: 964px;
+      padding: 40px 72px; overflow: hidden;
+      display: flex; flex-direction: column;
+      opacity: 0; pointer-events: none;
+      background: radial-gradient(900px circle at 88% 12%, rgba(94, 106, 210, 0.12), transparent 60%),
+                  radial-gradient(700px circle at 10% 90%, rgba(39, 166, 68, 0.05), transparent 55%),
+                  radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 32px 32px;
+      background-color: var(--bg-surface);
+      transition: opacity 0.2s ease-out;
+    }
+    .slide.active {
+      opacity: 1; pointer-events: auto; z-index: 10;
+    }
+
+    /* Typography Floors */
+    .kicker { font-family: var(--font-mono); font-size: 16px; letter-spacing: 0.09em; color: var(--accent-bright); margin-bottom: 8px; text-transform: uppercase; }
+    .slide-title { font-size: 44px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.12; margin-bottom: 8px; }
+    .slide-subtitle { font-size: 21px; color: var(--text-muted); line-height: 1.35; margin-bottom: 24px; }
+    .card-title { font-size: 22px; font-weight: 600; margin-bottom: 10px; color: var(--text-primary); }
+    .card-text { font-size: 18px; line-height: 1.45; color: var(--text-secondary); }
+    
+    /* Layout Primitives */
+    .split-layout { display: flex; gap: 40px; flex: 1; min-height: 0; }
+    .split-col { flex: 1; display: flex; flex-direction: column; gap: 24px; min-height: 0; }
+    .col-40 { flex: 0 0 40%; }
+    .col-60 { flex: 0 0 calc(60% - 40px); }
+    .col-58 { flex: 0 0 58%; }
+    .col-42 { flex: 0 0 calc(42% - 40px); }
+    .col-46 { flex: 0 0 46%; }
+    .col-54 { flex: 0 0 calc(54% - 40px); }
+    
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+    
+    /* Components */
+    .card {
+      background: var(--bg-card);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.09), 0 12px 32px -12px rgba(0, 0, 0, 0.65);
+      border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px;
+      display: flex; flex-direction: column;
+    }
+    .metric-value { font-size: 48px; font-weight: 700; font-family: var(--font-mono); color: var(--accent-bright); line-height: 1.1; margin-bottom: 4px; }
+    .metric-label { font-size: 16px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); }
+    td { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 18px; color: var(--text-secondary); line-height: 1.45; }
+    .table-matrix td { font-size: 16px; }
+
+    .code-block { font-family: var(--font-mono); font-size: 16px; background: #000; padding: 16px; border-radius: 8px; border: 1px solid var(--border); color: #a9b7c6; white-space: pre-wrap; word-break: break-all; }
+    .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 15px; cursor: pointer; font-family: var(--font-mono); font-weight: 600; }
+    .btn:hover { background: var(--accent-bright); }
+
+    /* SVGs */
+    svg text { font-family: var(--font-sans); fill: var(--text-secondary); font-size: 16px; }
+    .svg-title { fill: var(--text-primary); font-weight: 600; font-size: 19px; }
+    .svg-mono { font-family: var(--font-mono); font-size: 15px; }
+
+    /* Print & PDF Unrolling */
+    @media print {
+      @page { size: 1920px 1080px; margin: 0; }
+      html, body, .viewport-shell, .slide-stage {
+        width: 1920px !important; height: auto !important; overflow: visible !important; transform: none !important; display: block !important;
+      }
+      .stage-topbar, .stage-bottombar { display: none !important; }
+      .slide {
+        position: relative !important; top: 0 !important; opacity: 1 !important; pointer-events: auto !important;
+        display: flex !important; width: 1920px !important; height: 1080px !important; padding: 64px 80px !important;
+        page-break-after: always; break-after: page;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="viewport-shell">
+    <div class="slide-stage" id="stage">
+      
+      <!-- Topbar -->
+      <div class="stage-topbar">
+        <div class="topbar-brand">AKASHIC // POV</div>
+        <div class="topbar-controls">
+          <span class="badge accent" id="header-act-badge">POV THESIS</span>
+          <span class="badge" id="header-time-badge">00:00</span>
+          <select id="slide-selector">
+            <option value="1">1. Thesis</option>
+            <option value="2">2. Architecture</option>
+            <option value="3">3. Day-0 Value</option>
+            <option value="4">4. Live Demo</option>
+            <option value="5">5. The Intent Gap</option>
+            <option value="6">6. Governed Vault</option>
+            <option value="7">7. Rollout</option>
+            <option value="8">8. Appx A: Platform</option>
+            <option value="9">9. Appx B: Security</option>
+            <option value="10">10. Appx C: Android</option>
+            <option value="11">11. Appx D: Defense</option>
+          </select>
+          <span style="color:var(--text-muted); font-size:14px; font-family:var(--font-mono);">Overview [O] Notes [N] Fullscreen [F]</span>
+        </div>
+      </div>
+
+      <!-- Slides Container -->
+      <div id="slides-container">
+
+        <!-- Slide 1 -->
+        <div class="slide active" id="slide-1" data-act="POV THESIS" data-time="00:00">
+          <div class="kicker">01 // POV THESIS & EXECUTIVE SUMMARY</div>
+          <div class="slide-title">Context Retrieval Is the True Bottleneck for Enterprise AI Workflows</div>
+          <div class="slide-subtitle">Why 3-Axis Code Review and Automated RCA require a unified Rust Code Graph and Governed Vault</div>
+          <div class="split-layout">
+            <div class="split-col col-40">
+              <div class="card">
+                <div class="card-title">The Ask & The Bottleneck Found</div>
+                <div class="card-text">Tasked with building <strong>3-Axis Code Review</strong> (Standards, Spec, Complexity) and <strong>Automated RCA</strong>. Neither the LLM nor the prompt is the bottleneck; deterministic context retrieval at OEM Android scale is.</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Why Off-the-Shelf Tools Fail</div>
+                <div class="card-text"><strong>Python graphify</strong> invokes LLMs during indexing, burning cloud tokens and producing non-deterministic graphs. <strong>Raw Confluence / MotoJira MCPs</strong> retrieve obsolete 2023 pages alongside 2025 specs with identical cosine similarity and zero Scope or Supersession links.</div>
+              </div>
+              <div class="card" style="border-color: var(--accent);">
+                <div class="card-title" style="color: var(--accent-bright);">The Solution: Akashic</div>
+                <div class="card-text">Single host-native Rust binary and rmcp MCP server unifying a deterministic <strong>Code Graph</strong>, a governed OKF v0.2 Markdown <strong>Vault</strong>, and a checkpointed <strong>Local-Host Conductor</strong> for RCA.</div>
+              </div>
+            </div>
+            <div class="split-col col-60">
+              <svg viewBox="0 0 760 660" width="100%" height="100%">
+                <rect x="20" y="40" width="720" height="150" rx="12" fill="rgba(255,255,255,0.03)" stroke="var(--border)"/>
+                <text x="50" y="80" class="svg-title">Layer 1: Autonomous AI Workflows</text>
+                <text x="50" y="110">3-Axis Code Review + Automated RCA</text>
+                
+                <rect x="20" y="240" width="720" height="180" rx="12" fill="var(--bg-card)" stroke="var(--accent-bright)" stroke-width="2"/>
+                <text x="50" y="280" class="svg-title" fill="var(--accent-bright)">Layer 2: Akashic Context & Governance Substrate</text>
+                <text x="50" y="310">Rust CLI + rmcp stdio MCP</text>
+                <rect x="50" y="330" width="160" height="40" rx="6" fill="var(--bg-elevated)"/>
+                <text x="130" y="355" text-anchor="middle" class="svg-mono">Tree-sitter AST</text>
+                <rect x="230" y="330" width="160" height="40" rx="6" fill="var(--bg-elevated)"/>
+                <text x="310" y="355" text-anchor="middle" class="svg-mono">Hybrid RRF k=60</text>
+                <rect x="410" y="330" width="160" height="40" rx="6" fill="var(--bg-elevated)"/>
+                <text x="490" y="355" text-anchor="middle" class="svg-mono">L001-L011 Gate</text>
+
+                <rect x="20" y="470" width="720" height="150" rx="12" fill="rgba(255,255,255,0.03)" stroke="var(--border)"/>
+                <text x="50" y="510" class="svg-title">Layer 3: OEM Engineering Sources</text>
+                <text x="50" y="540">Bare Git (.git/objects) + OKF v0.2 Vault + Gerrit 29418</text>
+                
+                <path d="M 380 190 L 380 240" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arrow)"/>
+                <path d="M 380 240 L 380 190" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arrow)"/>
+                <path d="M 380 420 L 380 470" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arrow)"/>
+                <path d="M 380 470 L 380 420" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arrow)"/>
+                
+                <defs>
+                  <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/>
+                  </marker>
+                </defs>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 2 -->
+        <div class="slide" id="slide-2" data-act="ARCHITECTURE" data-time="02:00">
+          <div class="kicker">02 // UNIFIED RUST WORKSPACE & STORAGE ISOLATION</div>
+          <div class="slide-title">An 8-Crate Rust DAG and 3 Isolated SQLite Stores Eliminate Contention</div>
+          <div class="slide-subtitle">Strict compile-time layering and physical WAL separation between disposable indexes and durable RCA state</div>
+          <div class="split-layout">
+            <div class="split-col col-58">
+              <svg viewBox="0 0 920 620" width="100%" height="100%">
+                <rect x="0" y="0" width="920" height="620" fill="transparent"/>
+                <text x="20" y="40" class="svg-mono" fill="var(--text-muted)">TIER 1: ENTRY</text>
+                <line x1="20" y1="50" x2="900" y2="50" stroke="var(--border)" stroke-dasharray="4"/>
+                <rect x="150" y="60" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--accent)"/>
+                <text x="240" y="90" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-core</text>
+                <rect x="400" y="60" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="490" y="90" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-daemon</text>
+
+                <text x="20" y="160" class="svg-mono" fill="var(--text-muted)">TIER 2: RUNTIME</text>
+                <line x1="20" y1="170" x2="900" y2="170" stroke="var(--border)" stroke-dasharray="4"/>
+                <rect x="275" y="180" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="365" y="210" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-engine</text>
+
+                <text x="20" y="280" class="svg-mono" fill="var(--text-muted)">TIER 3: DOMAIN</text>
+                <line x1="20" y1="290" x2="900" y2="290" stroke="var(--border)" stroke-dasharray="4"/>
+                <rect x="100" y="300" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="190" y="330" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-vault</text>
+                <rect x="320" y="300" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="410" y="330" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-rca</text>
+                <rect x="540" y="300" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="630" y="330" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-lint</text>
+
+                <text x="20" y="400" class="svg-mono" fill="var(--text-muted)">TIER 4: FOUNDATION</text>
+                <line x1="20" y1="410" x2="900" y2="410" stroke="var(--border)" stroke-dasharray="4"/>
+                <rect x="220" y="420" width="180" height="50" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="310" y="450" text-anchor="middle" class="svg-mono" fill="var(--text-primary)">akashic-embedding</text>
+                <rect x="450" y="420" width="180" height="50" rx="8" fill="rgba(39, 166, 68, 0.1)" stroke="var(--success)"/>
+                <text x="540" y="450" text-anchor="middle" class="svg-mono" fill="var(--success)">akashic-sanitize</text>
+                
+                <path d="M 240 110 L 365 180" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 490 110 L 365 180" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 365 230 L 190 300" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 365 230 L 410 300" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 365 230 L 630 300" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 410 350 L 310 420" stroke="var(--border)" stroke-width="2"/>
+                <path d="M 410 350 L 540 420" stroke="var(--border)" stroke-width="2"/>
+              </svg>
+            </div>
+            <div class="split-col col-42">
+              <div class="card" style="padding: 16px;">
+                <div class="card-title" style="font-size: 18px; margin-bottom: 4px;">.akashic/code_graph.db <span class="badge" style="float:right;">DISPOSABLE</span></div>
+              </div>
+              <div class="card" style="padding: 16px;">
+                <div class="card-title" style="font-size: 18px; margin-bottom: 4px;">.akashic/vault_index.db <span class="badge" style="float:right;">DISPOSABLE</span></div>
+              </div>
+              <div class="card" style="padding: 16px; border-color: var(--success);">
+                <div class="card-title" style="font-size: 18px; margin-bottom: 4px; color: var(--success);">.akashic/rca_state.db <span class="badge success" style="float:right;">DURABLE</span></div>
+              </div>
+              <div class="card" id="crate-details" style="flex: 1;">
+                <div class="card-title">Crate: akashic-core</div>
+                <div class="card-text">CLI entrypoint and CLI argument parsing. Translates terminal commands into akashic-engine invocations.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 3 -->
+        <div class="slide" id="slide-3" data-act="ACT 1" data-time="04:30">
+          <div class="kicker">03 // ACT 1: EMPIRICAL DAY-0 MULTI-REPO DISCOVERY</div>
+          <div class="slide-title">Day-0 Static Discovery Indexes 20,231 Symbols with Zero LLMs</div>
+          <div class="slide-subtitle">Non-destructive bare-Git ingestion via gix and 5-pass Android package discovery work out of the box</div>
+          <div class="grid-4" style="margin-bottom: 40px;">
+            <div class="card" style="align-items: center; padding: 20px;">
+              <div class="metric-value">20,231</div><div class="metric-label">Code Symbols</div>
+            </div>
+            <div class="card" style="align-items: center; padding: 20px;">
+              <div class="metric-value">810</div><div class="metric-label">Package Mappings</div>
+            </div>
+            <div class="card" style="align-items: center; padding: 20px;">
+              <div class="metric-value">~140k</div><div class="metric-label">Code Edges</div>
+            </div>
+            <div class="card" style="align-items: center; padding: 20px; border-color: var(--success);">
+              <div class="metric-value" style="color: var(--success);">0</div><div class="metric-label" style="color: var(--success);">LLM Indexing Calls</div>
+            </div>
+          </div>
+          <div class="split-layout">
+            <div class="card split-col">
+              <table class="table-matrix">
+                <thead><tr><th>OEM App</th><th>Symbols</th><th>Mappings</th></tr></thead>
+                <tbody>
+                  <tr><td>AudioRecorder</td><td>9,792 <span class="badge success" style="float:right;font-size:12px;">EXTRACTED</span></td><td>180</td></tr>
+                  <tr><td>MotoAssistPremium</td><td>4,857 <span class="badge accent" style="float:right;font-size:12px;">INFERRED >= 0.82</span></td><td>488</td></tr>
+                  <tr><td>motoDolbyUI</td><td>3,148 <span class="badge success" style="float:right;font-size:12px;">EXTRACTED</span></td><td>88</td></tr>
+                  <tr><td>FMRadio</td><td>2,434 <span class="badge" style="float:right;font-size:12px;">AMBIGUOUS</span></td><td>54</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card split-col">
+              <div class="card-title">5-Pass Clone-to-Onboard Discovery</div>
+              <div class="card-text" style="display:flex; flex-direction:column; gap: 8px; font-family: var(--font-mono); font-size: 15px;">
+                <div>1. build.gradle applicationId + suffix</div>
+                <div>2. Module namespace</div>
+                <div>3. AndroidManifest.xml package</div>
+                <div>4. Java/Kotlin source prefix</div>
+                <div>5. .git/config Gerrit remote</div>
+              </div>
+              <div class="card-text" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+                <strong>Zero-Mutation Ingestion:</strong> Reads blobs from <code>.git/objects</code> in memory via <code>gix</code>; zero Gradle cache invalidation.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 4 -->
+        <div class="slide" id="slide-4" data-act="LIVE DEMO" data-time="08:00">
+          <div class="kicker">04 // TWO-MINUTE LIVE / RECORDED TERMINAL WALKTHROUGH</div>
+          <div class="slide-title">From Multi-Repo Blast Radius to Governed Vault Crystallization in Seconds</div>
+          <div class="slide-subtitle">Interactive chapter replay of live CLI and rmcp MCP execution across Motorola OEM repositories</div>
+          <div class="split-layout">
+            <!-- Left Column (40%) -->
+            <div class="split-col col-40" style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- Chapter Selector Tabs -->
+              <div id="chapter-tabs" style="display: flex; flex-direction: column; gap: 8px;">
+                <div class="badge accent" id="tab-1" onclick="window.setDemoChapter(1)" style="cursor: pointer; padding: 12px; font-size: 16px; border: 1px solid var(--accent); transition: all 0.2s;">Chapter 1: Multi-Repo OEM Discovery &amp; Scale [PRODUCTION FACT // LIVE AST]</div>
+                <div class="badge" id="tab-2" onclick="window.setDemoChapter(2)" style="cursor: pointer; padding: 12px; font-size: 16px; border: 1px solid transparent; transition: all 0.2s;">Chapter 2: Pre-Review Blast Radius &amp; Provenance [PRODUCTION FACT // LIVE AST]</div>
+                <div class="badge" id="tab-3" onclick="window.setDemoChapter(3)" style="cursor: pointer; padding: 12px; font-size: 16px; border: 1px solid transparent; transition: all 0.2s;">Chapter 3: Camera3 RCA &amp; Supersession [PoC SIMULATION // SYNTHETIC SCENARIO]</div>
+              </div>
+              <!-- Takeaways Card -->
+              <div class="card" id="takeaways-card" style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+                <div class="card-title" id="takeaways-title" style="margin-bottom: 12px;">Chapter 1 Highlights</div>
+                <div class="card-text" id="takeaways-content" style="font-size: 16px; line-height: 1.5;"></div>
+              </div>
+            </div>
+            <!-- Right Column (60%) -->
+            <div class="split-col col-60">
+              <div class="card" style="flex: 1; padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
+                <!-- Terminal Header -->
+                <div style="height: 40px; background: #1e1e1e; display: flex; align-items: center; padding: 0 16px; gap: 8px; border-bottom: 1px solid #333; flex-shrink: 0;">
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56;"></div>
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e;"></div>
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f;"></div>
+                  <div style="color: #888; font-family: var(--font-mono); font-size: 13px; margin-left: 12px;">akashic-cli v0.2.0 -- deterministic gate</div>
+                </div>
+                <!-- Terminal Content -->
+                <div class="code-block" id="terminal-content" style="flex: 1; border: none; border-radius: 0; background: #0a0a0a; margin: 0; font-size: 13px; line-height: 1.4; overflow-y: auto; white-space: pre-wrap;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 5 -->
+        <div class="slide" id="slide-5" data-act="THE INTENT GAP" data-time="10:30">
+          <div class="kicker">05 // ACT 2: WHY RAW RAG AND CODE STRUCTURE ALONE PLATEAU</div>
+          <div class="slide-title">Raw Confluence and MotoJira MCPs Cannot Replace Governed Repository Specs</div>
+          <div class="slide-subtitle">Code structure reveals what the code is, but verifying intent requires versioned, conflict-free rules</div>
+          <div class="card" style="flex: 1; padding: 0; overflow: hidden; display: flex; flex-direction: column;">
+            <table class="table-matrix" style="flex: 1;">
+              <thead>
+                <tr>
+                  <th>Workflow Axis</th>
+                  <th>Day-0: Code Graph Only</th>
+                  <th>Raw Confluence / MotoJira MCP</th>
+                  <th style="color: var(--accent-bright);">Day-1: Curated Vault + Graph</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>CR: Complexity & Blast Radius</td><td>Excellent</td><td>Irrelevant</td><td style="color: var(--accent-bright);">Excellent</td></tr>
+                <tr><td>CR: Coding Standards</td><td>None</td><td>Stochastic / Conflicting</td><td style="color: var(--accent-bright);">Deterministic Lints</td></tr>
+                <tr><td>CR: Spec Compliance</td><td>None</td><td>High Hallucination Risk</td><td style="color: var(--accent-bright);">Governed Spec Checks</td></tr>
+                <tr><td>RCA: Symbolication & Tracing</td><td>Excellent</td><td>None</td><td style="color: var(--accent-bright);">Excellent</td></tr>
+                <tr><td>RCA: Current Guidance</td><td>None</td><td>Retrieves 2023 deprecations</td><td style="color: var(--accent-bright);">Supersession Aware</td></tr>
+                <tr><td>RCA: Negative Knowledge</td><td>None</td><td>Rarely Documented</td><td style="color: var(--accent-bright);">Incident Postmortems</td></tr>
+              </tbody>
+            </table>
+            <div style="background: rgba(94, 106, 210, 0.1); padding: 16px 24px; border-top: 1px solid var(--accent); color: var(--text-primary); font-size: 16px;">
+              <strong>Bootstrap & Ownership Contract:</strong> confluence-mcp and motojira-mcp can draft candidate docs via <code>akashic vault plan</code>, but domain teams must curate, verify, and commit authoritative Specs, Business Rules, Coding Standards, and ADRs into their repo Vault.
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 6 -->
+        <div class="slide" id="slide-6" data-act="GOVERNED VAULT" data-time="13:30">
+          <div class="kicker">06 // ACT 3: GOVERNED OKF V0.2 VAULT & CRYSTALLIZATION</div>
+          <div class="badge" style="background: rgba(255, 189, 46, 0.15); color: #ffbd2e; border: 1px solid rgba(255, 189, 46, 0.4); margin-bottom: 8px; align-self: flex-start; display: inline-block;">SYNTHETIC REFERENCE ARCHITECTURE // PoC SCENARIO</div>
+          <div class="slide-title">Forward-Only Supersession Prevents Stale Decisions from Poisoning RCA</div>
+          <div class="slide-subtitle">Illustrative reference architecture in prototype-akashic-rca-vault demonstrating forward-only supersession and deterministic L001-L011 linting before production bootstrap.</div>
+          <div class="split-layout">
+            <div class="split-col col-58">
+              <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <button class="badge accent">--mode current</button>
+                <button class="badge">--mode lineage</button>
+              </div>
+              <svg viewBox="0 0 880 500" width="100%" height="100%">
+                <rect x="0" y="0" width="880" height="500" fill="transparent"/>
+                <rect x="40" y="40" width="280" height="80" rx="8" fill="var(--bg-elevated)" stroke="var(--border)" opacity="0.5"/>
+                <text x="180" y="70" text-anchor="middle" class="svg-title" fill="var(--text-muted)">decision-buffer-opt</text>
+                <text x="180" y="95" text-anchor="middle" class="svg-mono" fill="var(--text-muted)">CL 489201</text>
+                <rect x="220" y="30" width="110" height="24" rx="4" fill="#333"/>
+                <text x="275" y="47" text-anchor="middle" font-size="12" fill="#888">SUPERCEDED</text>
+
+                <rect x="40" y="200" width="280" height="80" rx="8" fill="rgba(229, 72, 77, 0.1)" stroke="var(--danger)"/>
+                <text x="180" y="230" text-anchor="middle" class="svg-title" fill="var(--danger)">incident-motocam-9102</text>
+                <text x="180" y="255" text-anchor="middle" class="svg-mono" fill="var(--danger)">SIGSEGV falcon</text>
+
+                <rect x="40" y="360" width="280" height="80" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="180" y="390" text-anchor="middle" class="svg-title">evidence-motocam-stack</text>
+                <text x="180" y="415" text-anchor="middle" class="svg-mono">CameraDeviceClient.cpp:412</text>
+
+                <rect x="480" y="120" width="280" height="80" rx="8" fill="rgba(39, 166, 68, 0.1)" stroke="var(--success)"/>
+                <text x="620" y="150" text-anchor="middle" class="svg-title" fill="var(--success)">decision-revert-cl-489201</text>
+                <text x="620" y="175" text-anchor="middle" class="svg-mono" fill="var(--success)">CL 490102 ACTIVE</text>
+                
+                <path d="M 180 200 L 180 120" stroke="var(--danger)" stroke-width="2" marker-end="url(#arrow-danger)"/>
+                <text x="190" y="165" class="svg-mono" fill="var(--danger)" font-size="12">caused_by</text>
+
+                <path d="M 180 360 L 180 280" stroke="var(--text-muted)" stroke-width="2" marker-end="url(#arrow)"/>
+                <text x="190" y="325" class="svg-mono" fill="var(--text-muted)" font-size="12">supported_by</text>
+
+                <path d="M 480 160 L 320 80" stroke="var(--success)" stroke-width="2" marker-end="url(#arrow-success)"/>
+                <text x="400" y="110" class="svg-mono" fill="var(--success)" font-size="12">supersedes</text>
+                
+                <defs>
+                  <marker id="arrow-danger" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--danger)"/>
+                  </marker>
+                  <marker id="arrow-success" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--success)"/>
+                  </marker>
+                </defs>
+              </svg>
+            </div>
+            <div class="split-col col-42">
+              <div class="card" style="padding: 16px; font-family: var(--font-mono); font-size: 14px; background: #000;">
+                <div style="color: var(--accent-bright);">---</div>
+                <div>id: decision-revert-cl-489201</div>
+                <div>type: decision</div>
+                <div>status: active</div>
+                <div>supersedes:</div>
+                <div>  - decision-buffer-release-optimization</div>
+                <div>responds_to:</div>
+                <div>  - incident-motocam-9102</div>
+                <div style="color: var(--accent-bright);">---</div>
+              </div>
+              <div class="card" style="flex:1;">
+                <div class="card-title">Governance Pillars</div>
+                <ul class="card-text" style="padding-left: 24px; display:flex; flex-direction:column; gap: 12px;">
+                  <li><strong>Forward-Only Supersession:</strong> Never delete, only supersede. Maintains context of past failures.</li>
+                  <li><strong>Strict Conflict Abstention:</strong> Halts automated merges if vault rules contradict code state.</li>
+                  <li><strong>Plan -&gt; Lint -&gt; Apply:</strong> All vault updates must pass deterministic L001-L011 rules.</li>
+                </ul>
+                <div style="background: rgba(255, 189, 46, 0.08); border: 1px solid rgba(255, 189, 46, 0.25); border-radius: 8px; padding: 12px 16px; margin-top: 12px; font-size: 13px; color: var(--text-secondary);">
+                  <strong style="color: #ffbd2e;">Data Provenance Notice:</strong> The com.motorola.camera3 incident, stack trace, and Gerrit CL references (489201 / 490102) are synthetic PoC test fixtures authored to stress-test OKF v0.2 supersession DAG resolution. Production vaults will be bootstrapped with real team artifacts.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+                <!-- Slide 7 -->
+        <div class="slide" id="slide-7" data-act="ROLLOUT" data-time="16:00">
+          <div class="kicker">07 // OPERATIONAL EVALUATION & TECHNICAL HAND-OFF</div>
+          <div class="slide-title">Technical Validation and Operational Deployment Model</div>
+          <div class="slide-subtitle">Engineering evaluation across local developer workstations and centralized Gerrit stream automation</div>
+          <div class="split-col">
+            <div class="split-layout" style="flex:0 0 auto;">
+              <div class="card split-col">
+                <div class="card-title">Operational Tier 1: Workstation-Local Toolchain (Evaluated)</div>
+                <div class="card-text">CLI and MCP server deployed directly in local developer/agent workspaces. Zero centralized server infrastructure; local SQLite WAL provides instant query response.</div>
+              </div>
+              <div class="card split-col" style="border-color: var(--accent);">
+                <div class="card-title" style="color: var(--accent-bright);">Operational Tier 2: Centralized Gerrit Stream Automation (Architecture Ready)</div>
+                <div class="card-text">Daemon mode architecture running <code>akashic daemon</code> on build infrastructure, watching the Gerrit event stream for pre-merge validation, soak crash deduplication, and automated gating.</div>
+              </div>
+            </div>
+            <div class="split-layout">
+              <div class="card split-col" style="background: rgba(255,255,255,0.02);">
+                <div class="card-title">Platform Engineering Findings & Interfaces</div>
+                <ul class="card-text" style="padding-left: 20px;">
+                  <li>Single static Rust binary footprint with zero external runtime dependencies (JVM/Python-free).</li>
+                  <li>3-DB physical WAL architecture (<code>code_graph.db</code>, <code>vault.db</code>, <code>rca_state.db</code>) guarantees concurrent agent reads without write lock starvation.</li>
+                  <li>Tier-4 sanitization crate enforces mandatory logcat pseudonymization and secret scrubbing at the compiler level prior to agent context injection.</li>
+                </ul>
+              </div>
+              <div class="card split-col" style="background: rgba(255,255,255,0.02);">
+                <div class="card-title">Android OEM Engineering Findings & Interfaces</div>
+                <ul class="card-text" style="padding-left: 20px;">
+                  <li>5-Pass Clone-to-Onboard algorithm accurately resolves OEM multi-repo topologies and Gradle flavors.</li>
+                  <li>Bare Git ingestion (<code>gix</code>) reads objects in memory, ensuring zero invalidation of local Gradle build caches.</li>
+                  <li>Project domain teams maintain versioned Markdown specs and ADRs in repository vaults rather than relying on uncurated wiki pages.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>\n\n        <!-- Slide 8 -->
+        <div class="slide" id="slide-8" data-act="APPENDIX A" data-time="18:00">
+          <div class="kicker">08 // APPENDIX A: CONSOLIDATED ARCHITECTURE & AGENT MCP</div>
+          <div class="slide-title">Single Consolidated Rust Engine and Native Agent MCP Server</div>
+          <div class="slide-subtitle">Consolidating exploratory code-review and RCA research into a unified binary with native stdio JSON-RPC agent tools</div>
+          <div class="split-layout">
+            <div class="card split-col">
+              <div class="card-title">Research Evolution: Prototype vs Unified Engine</div>
+              <table class="table-matrix">
+                <thead>
+                  <tr>
+                    <th>Axis</th>
+                    <th>Early Research Prototype (Python/LLM)</th>
+                    <th>Consolidated Rust Engine</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><th>Indexing Cost</th><td>High Cloud Token Burn</td><td>0 Cloud Tokens (Native AST)</td></tr>
+                  <tr><th>Graph Determinism</th><td>Stochastic / Non-deterministic</td><td>100% Deterministic Tree-sitter AST</td></tr>
+                  <tr><th>Implementation Scope</th><td>Disparate exploratory scripts</td><td>Single Unified Binary (<code>akashic</code>)</td></tr>
+                  <tr><th>Agent Interface</th><td>Fragmented experimental CLIs</td><td>Unified <code>rmcp</code> Model Context Protocol Server</td></tr>
+                </tbody>
+              </table>
+              <div style="font-size: 13px; color: var(--text-muted); margin-top: 16px;">
+                Note: <code>alexandria</code> and <code>akashic-records</code> were internal research prototypes developed during code-review and RCA experiments. <code>akashic</code> is the sole consolidated production architecture.
+              </div>
+            </div>
+            <div class="card split-col">
+              <div class="card-title">Agent MCP Architecture: Deterministic Grounding</div>
+              <div class="code-block" style="font-size: 13px; line-height: 1.5; background: #0a0a0a; border-radius: 6px; padding: 12px; overflow-y: auto;">
+<div style="color: #ffbd2e; margin-bottom: 8px;">Transport: stdio (JSON-RPC 2.0 via rmcp)</div>
+<div style="color: var(--accent-bright);">akashic_graph_query</div>
+<div style="color: var(--text-secondary); margin-bottom: 8px;">Provides instant symbol navigation and caller graphs across OEM apps.</div>
+<div style="color: var(--accent-bright);">akashic_blast_radius</div>
+<div style="color: var(--text-secondary); margin-bottom: 8px;">Computes transitive caller/callee closures before agent modifies code.</div>
+<div style="color: var(--accent-bright);">akashic_vault_query</div>
+<div style="color: var(--text-secondary); margin-bottom: 8px;">Injects active, conflict-free domain rules (<code>mode: current</code>) and filters superseded decisions.</div>
+<div style="color: var(--accent-bright);">akashic_rca_symbolicate</div>
+<div style="color: var(--text-secondary); margin-bottom: 8px;">Automated native/Java crash symbolication and SHA-256 signature deduplication.</div>
+              </div>
+              <div style="font-size: 14px; font-weight: bold; margin-top: 16px; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; border-left: 4px solid var(--accent);">
+                Takeaway: Autonomous coding agents (such as Gemini Code Assist) obtain verified repository facts and governed rules through low-latency tool calls without hallucination.
+              </div>
+            </div>
+          </div>
+        </div>\n\n<!-- Slide 9 -->
+        <div class="slide" id="slide-9" data-act="APPENDIX B" data-time="18:00">
+          <div class="kicker">09 // APPENDIX B: SECURITY & COMPLIANCE BATTLECARD (Q4)</div>
+          <div class="slide-title">Mandatory Tier-4 Sanitization Scrubs Secrets and Pseudonymizes Logcat PII</div>
+          <div class="slide-subtitle">akashic-sanitize sits at the bottom of the crate DAG so no engine, vault, or RCA path can bypass it</div>
+          <div class="card" style="margin-bottom: 24px; padding: 16px 24px; background: rgba(39, 166, 68, 0.1); border-color: var(--success);">
+            <div class="card-title" style="color: var(--success); font-size: 18px; margin: 0;">Tier-4 Security Constraint (ADR 0007)</div>
+            <div class="card-text" style="font-size: 16px;">Because <code>akashic-sanitize</code> is at Tier 4, any outbound text to an embedding model or LLM MUST pass through it. The compiler enforces this dependency graph.</div>
+          </div>
+          <div class="split-layout">
+            <div class="card split-col">
+              <div class="card-title">CodeProfile: Secret Replacement</div>
+              <div class="code-block" style="font-size: 14px;">- const String API_KEY = "sk-live-8a9b2...";
++ const String API_KEY = "SAN_STR_TOKEN_A8F1";</div>
+              <div class="card-text" style="margin-top: 12px; font-size: 15px;">AST-preserving secret replacement ensures syntax trees remain valid for analysis.</div>
+            </div>
+            <div class="card split-col">
+              <div class="card-title">LogProfile: Semantic Pseudonymization</div>
+              <div class="code-block" style="font-size: 14px;">- Incoming call from +1-555-0198 (IMEI 354...)
++ Incoming call from &lt;PHONE:US_VALID_10DIGIT&gt; (IMEI &lt;IMEI:VALID_15DIGIT&gt;)</div>
+              <div class="card-text" style="margin-top: 12px; font-size: 15px;">Format-preserving rules with per-session cryptographic salt allow the LLM to trace state across logs without seeing real PII (Phone, IMEI, MAC).</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 10 -->
+        <div class="slide" id="slide-10" data-act="APPENDIX C" data-time="18:00">
+          <div class="kicker">10 // APPENDIX C: ANDROID PE BATTLECARD (Q5, Q6 & Q7)</div>
+          <div class="slide-title">Zero-Gradle Bare Git Ingestion and Pre-LLM Soak Storm Deduplication</div>
+          <div class="slide-subtitle">Multi-module flavor discovery, incremental build cache safety, and 2GB NVMe LRU symbolication</div>
+          <div class="split-layout">
+            <div class="split-col col-40" style="display:flex; flex-direction:column; gap:24px;">
+              <div class="card">
+                <div class="card-title">Q5: Module Discovery</div>
+                <div class="card-text">The 5-Pass Clone-to-Onboard Discovery identified 810 mappings cleanly across the 4 major apps.</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Q6: Gradle Cache Safety</div>
+                <div class="card-text">Bare <code>gix</code> reads <code>.git/objects</code> in memory. Zero working-tree touches mean zero Gradle cache invalidation.</div>
+              </div>
+            </div>
+            <div class="card split-col col-60">
+              <div class="card-title">Q7: Pre-LLM Deduplication Pipeline</div>
+              <ul class="card-text" style="padding-left: 20px; display:flex; flex-direction:column; gap: 12px;">
+                <li><strong>Stage 1:</strong> Ingest Raw Crash Log</li>
+                <li><strong>Stage 2:</strong> Match Package & Version</li>
+                <li><strong>Stage 3:</strong> 2GB NVMe Symbol Store LRU Cache + addr2line / R8 retrace</li>
+                <li><strong style="color:var(--accent-bright);">Stage 4:</strong> <code>CrashSignature = sha256(app_id + exception + top_3_frames)</code></li>
+                <li><strong>Stage 5:</strong> If Signature Exists -&gt; Append Count and Halt (0 LLM Calls)</li>
+                <li><strong>Stage 6:</strong> If New -&gt; Forward to RCA Conductor</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 11 -->
+        <div class="slide" id="slide-11" data-act="APPENDIX D" data-time="18:00">
+          <div class="kicker">11 // APPENDIX D: HALLUCINATION DEFENSE & CURATION ROI (Q2 & Q8)</div>
+          <div class="slide-title">Four-Layer Hallucination Defense and Pragmatic Team Curation Flywheel</div>
+          <div class="slide-subtitle">Combining explicit Edge Provenance, temporal supersession, conflict abstention, and adversarial falsification</div>
+          <div class="split-layout">
+            <div class="card split-col">
+              <div class="card-title">4-Layer Hallucination Defense</div>
+              <ol class="card-text" style="padding-left: 24px; display:flex; flex-direction:column; gap: 16px;">
+                <li><strong>Explicit Edge Provenance:</strong> AST extraction guarantees structural facts (Hybrid RRF k=60).</li>
+                <li><strong>Temporal Supersession:</strong> Vault lineage ensures only "Current Guidance" is retrieved.</li>
+                <li><strong>Strict Conflict Abstention:</strong> If facts contradict, the system halts and asks humans.</li>
+                <li><strong>Adversarial Falsification:</strong> 2-Stage LLM check to aggressively attempt to disprove the drafted RCA.</li>
+              </ol>
+            </div>
+            <div class="card split-col">
+              <div class="card-title">3-Step Pragmatic Curation Flywheel</div>
+              <div style="display:flex; flex-direction:column; gap: 16px; margin-top: 16px;">
+                <div class="badge">Step 1: Day 0 Immediate Code Graph Value (Zero Docs)</div>
+                <div style="text-align:center; color: var(--border-bright);">↓</div>
+                <div class="badge accent">Step 2: AI-Assisted Bootstrap (akashic vault plan)</div>
+                <div style="text-align:center; color: var(--border-bright);">↓</div>
+                <div class="badge success">Step 3: Team Sign-Off & Self-Crystallizing RCA</div>
+              </div>
+              <div class="card-text" style="margin-top: 24px;">
+                The AI is a synthesizer, not an oracle. It relies on the team to curate the deterministic substrate.
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bottombar -->
+      <div class="stage-bottombar">
+        <div style="font-family: var(--font-mono); font-size: 14px; color: var(--text-muted);">[Space]/[→] Next &nbsp;&nbsp; [←] Prev</div>
+        <div style="flex:1; margin: 0 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; position: relative;">
+          <div id="progress-bar" style="position:absolute; top:0; left:0; height:100%; width: 9%; background: var(--accent); border-radius: 2px; transition: width 0.2s;"></div>
+        </div>
+        <div id="footer-progress" style="font-family: var(--font-mono); font-size: 14px; color: var(--text-secondary);">1 / 11</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const slides = document.querySelectorAll('.slide');
+    const totalSlides = slides.length;
+    let currentSlide = 0;
+    
+    const progressBar = document.getElementById('progress-bar');
+    const footerProgress = document.getElementById('footer-progress');
+    const slideSelector = document.getElementById('slide-selector');
+    const actBadge = document.getElementById('header-act-badge');
+    const timeBadge = document.getElementById('header-time-badge');
+    
+    const demoData = {
+      1: {
+        title: "Chapter 1 Highlights",
+        takeaways: "4 OEM Repositories, 810 Package Mappings, 20,231 Symbols, 91,077 AST Edges vs 52,183 Inferred Edges. Architectural God-Nodes (<code>logD</code>, <code>run</code>, <code>TranscribeAudioAICore</code>).",
+        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph discover --summary</span>\nMulti-Repo OEM Discovery (settings.gradle + AndroidManifest.xml 5-pass index):\n\n<span style="color:#00d8d6;">REPOSITORY</span>         | GERRIT PROJECT                   | PRIMARY APPLICATION ID (VAULT PARTITION)         |  <span style="color:#2ecc71;">PKGS</span> | <span style="color:#2ecc71;">SYMBOLS</span>\n--------------------------------------------------------------------------------------------------------------------------\n<span style="color:#00d8d6;">AudioRecorder</span>      | ...a/packages/apps/AudioRecorder | com.motorola.audiorecorder.recordingservice      |   <span style="color:#2ecc71;">180</span> |   <span style="color:#2ecc71;">9,792</span>\n<span style="color:#00d8d6;">FMRadio</span>            | ...otorola/packages/apps/FMRadio | com.motorola.fmsdktestapp                        |    <span style="color:#2ecc71;">54</span> |   <span style="color:#2ecc71;">2,434</span>\n<span style="color:#00d8d6;">MotoAssistPremium</span>  | apps/MotoAssistPremium           | com.motorola.moto                                |   <span style="color:#2ecc71;">488</span> |   <span style="color:#2ecc71;">4,857</span>\n<span style="color:#00d8d6;">motoDolbyUI</span>        | ...ola/packages/apps/motoDolbyUI | com.motorola.motoaudioeffects                    |    <span style="color:#2ecc71;">88</span> |   <span style="color:#2ecc71;">3,148</span>\n==========================================================================================================================\n<span style="color:#ffbd2e;">TOTALS: 4 OEM Repositories | 810 Package Mappings | 20,231 Code Symbols</span>\nEDGE PROVENANCE: 143,260 Edges (91,077 EXTRACTED AST [calls/inherits] | 52,183 INFERRED [score >= 0.82])\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph god-nodes --repo-name AudioRecorder --top-n 5</span>\nlogD: in=2160, out=5, total=2165\nlogW: in=836, out=3, total=839\nlogI: in=513, out=1, total=514\nverify: in=255, out=4, total=259\nTranscribeAudioAICore: in=162, out=6, total=168'
+      },
+      2: {
+        title: "Chapter 2 Highlights",
+        takeaways: "Deep Transitive Closure for <code>removeUIObservers()</code>. Pre-review gate feeds 46 upstream callers, 24 downstream dependencies. Provenance breakdown (100% Extracted AST vs 0.95+ semantic similarity).",
+        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph blast-radius --repo-name AudioRecorder "AudioRecorder::...::MainFragment.removeUIObservers()#0" --max-depth 2</span>\nBlast radius: <span style="color:#2ecc71;">46</span> upstream callers, <span style="color:#2ecc71;">24</span> downstream dependencies\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph edges --symbol "MainFragment.removeUIObservers" --provenance</span>\nTarget Symbol: MainFragment.removeUIObservers()\n\nEDGE TYPE            | PROVENANCE TIER  | SCORE  | CONNECTED TARGET SYMBOL\n------------------------------------------------------------------------------------------\nCALLS                | EXTRACTED        | 1.00   | logD\nCALLS                | EXTRACTED        | 1.00   | requireActivity\nCALLS                | EXTRACTED        | 1.00   | unregisterLargeDisplayUIObservers\nCALLS                | EXTRACTED        | 1.00   | removeRecordingObservers\nCALLS                | EXTRACTED        | 1.00   | removePermissionsObservers\nSEMANTIC_SIMILARITY  | INFERRED         | 0.96   | MainFragmentCLI.removeUIObservers()#0\nSEMANTIC_SIMILARITY  | INFERRED         | 0.95   | RecordsListFragment.removeObservers()#0\n==========================================================================================\n<span style="font-weight:bold;">Verification Axis: Complexity & Blast Radius feeds automated pre-review gate.</span>'
+      },
+      3: {
+        title: "Chapter 3 Highlights",
+        takeaways: "Proof of Concept Reference Scenario: Built on synthetic reference vault fixtures (prototype-akashic-rca-vault) to validate OKF v0.2 L001-L011 lint gates and forward-only supersession resolution prior to production vault rollout.",
+        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic lint --vault prototype-akashic-rca-vault/akashic/com.motorola.camera3 --strict</span>\n<span style="font-weight:bold;">Lint result: valid = true, issues = 0</span>\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic vault query --mode current --node-id decision-buffer-release-optimization</span>\n{\n  "mode": "current",\n  "seed_id": "decision-buffer-release-optimization",\n  "is_current": false,\n  "active_guidance_id": "decision-revert-cl-489201",\n  "supersession_chain": [\n    {\n      "predecessor": "decision-buffer-release-optimization",\n      "successor": "decision-revert-cl-489201",\n      "evidence": "../evidence/evidence-motocam-9102-stack.md"\n    }\n  ]\n}\n\n<span style="color:#2ecc71; font-weight:bold;">[FORWARD SUPERSESSION RESOLVED]</span>\n  Query Seed: decision-buffer-release-optimization (is_current: false)\n  Active Guidance: decision-revert-cl-489201 (Gerrit CL 490102)\n  Supersession Chain: decision-buffer-release-optimization -> decision-revert-cl-489201'
+      }
+    };
+
+    window.setDemoChapter = function(chapter) {
+      document.getElementById('tab-1').className = 'badge';
+      document.getElementById('tab-2').className = 'badge';
+      document.getElementById('tab-3').className = 'badge';
+      document.getElementById('tab-1').style.borderColor = 'transparent';
+      document.getElementById('tab-2').style.borderColor = 'transparent';
+      document.getElementById('tab-3').style.borderColor = 'transparent';
+      
+      const activeTab = document.getElementById('tab-' + chapter);
+      if (activeTab) {
+        activeTab.className = 'badge accent';
+        activeTab.style.borderColor = 'var(--accent)';
+      }
+      
+      const tc = document.getElementById('takeaways-content');
+      const tt = document.getElementById('takeaways-title');
+      const term = document.getElementById('terminal-content');
+      
+      if (tc && tt && term && demoData[chapter]) {
+        tt.innerHTML = demoData[chapter].title;
+        tc.innerHTML = demoData[chapter].takeaways;
+        term.innerHTML = demoData[chapter].terminal;
+      }
+    };
+    
+    // Initialize chapter 1 once DOM is loaded
+    setTimeout(() => window.setDemoChapter(1), 100);
+
+
+    function updateScale() {
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      document.documentElement.style.setProperty('--slide-scale', scale);
+    }
+    window.addEventListener('resize', updateScale);
+    updateScale();
+
+    function updateSlide(index) {
+      if (index < 0 || index >= totalSlides) return;
+      slides[currentSlide].classList.remove('active');
+      currentSlide = index;
+      slides[currentSlide].classList.add('active');
+      
+      const p = ((currentSlide + 1) / totalSlides) * 100;
+      progressBar.style.width = `${p}%`;
+      footerProgress.innerText = `${currentSlide + 1} / ${totalSlides}`;
+      slideSelector.value = currentSlide + 1;
+      
+      const act = slides[currentSlide].dataset.act || '';
+      const time = slides[currentSlide].dataset.time || '';
+      actBadge.innerText = act;
+      timeBadge.innerText = time;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') { updateSlide(currentSlide + 1); }
+      if (e.key === 'ArrowLeft') { updateSlide(currentSlide - 1); }
+      if (e.key >= '1' && e.key <= '3' && slides[currentSlide].id === 'slide-4') {
+        window.setDemoChapter(parseInt(e.key));
+        return;
+      }
+      if (e.key >= '1' && e.key <= '9') { updateSlide(parseInt(e.key) - 1); }
+      if (e.key === '0') { updateSlide(9); }
+      if (e.key === '-') { updateSlide(10); }
+      if (e.key.toLowerCase() === 'a') { updateSlide(7); } // Jump to Appx A (Slide 8)
+      if (e.key.toLowerCase() === 'f') {
+        if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }
+        else { document.exitFullscreen(); }
+      }
+    });
+
+    slideSelector.addEventListener('change', (e) => {
+      updateSlide(parseInt(e.target.value) - 1);
+    });
+
+    
+    // Programmatic Audit Helper
+    window.auditSlides = function() {
+      let passed = true;
+      let overflows = [];
+      
+      const checkElements = document.querySelectorAll('.slide, .card, .table-matrix, .code-block, .split-col');
+      checkElements.forEach((el, index) => {
+        const hasOverflow = (el.scrollHeight > el.clientHeight + 2) || (el.scrollWidth > el.clientWidth + 2);
+        if (hasOverflow && el.clientHeight > 0) {
+          passed = false;
+          overflows.push({ element: el.className || el.tagName, scrollH: el.scrollHeight, clientH: el.clientHeight, scrollW: el.scrollWidth, clientW: el.clientWidth });
+        }
+      });
+      
+      return { passed, totalSlides, overflows };
+    };
+    
+    updateSlide(0);
+  </script>
+</body>
+</html>

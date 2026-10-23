@@ -544,10 +544,14 @@ pub struct GraphSymbolArgs {
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum RcaCommands {
     Run(RcaRunArgs),
+    Prepare(RcaRunArgs),
+    Context(RcaContextArgs),
+    SubmitFinding(RcaSubmitFindingArgs),
     Resume(RcaResumeArgs),
     Status(RcaStatusArgs),
     Symbolicate(RcaSymbolicateArgs),
     Crystallize(RcaCrystallizeArgs),
+    Curate(RcaCurateArgs),
     Supersede(RcaSupersedeArgs),
     Start(RcaStartArgs),
     Triage,
@@ -565,6 +569,26 @@ pub struct RcaRunArgs {
     pub jira_key: Option<String>,
     #[arg(long)]
     pub trigger_id: Option<String>,
+    #[arg(long)]
+    pub two_phase: bool,
+    #[arg(long)]
+    pub prepare_only: bool,
+    #[arg(long)]
+    pub finding_file: Option<String>,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct RcaContextArgs {
+    #[arg(long)]
+    pub run_id: String,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct RcaSubmitFindingArgs {
+    #[arg(long)]
+    pub run_id: String,
+    #[arg(long)]
+    pub finding_file: String,
 }
 
 #[derive(Args, Debug, PartialEq, Default)]
@@ -593,6 +617,24 @@ pub struct RcaCrystallizeArgs {
     pub run_id: String,
     #[arg(long)]
     pub summary: Option<String>,
+    #[arg(long)]
+    pub finding_file: Option<String>,
+    #[arg(long)]
+    pub outcome: Option<String>,
+    #[arg(long)]
+    pub remediation: Option<String>,
+    #[arg(long)]
+    pub confidence: Option<f64>,
+    #[arg(long)]
+    pub hold_for_curation: bool,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct RcaCurateArgs {
+    #[arg(long)]
+    pub run_id: String,
+    #[arg(long)]
+    pub candidate_id: String,
 }
 
 #[derive(Args, Debug, PartialEq, Default)]
@@ -621,6 +663,7 @@ pub enum DaemonCommands {
     Status,
     Catchup(DaemonCatchupArgs),
     Discover(DaemonDiscoverArgs),
+    ServeA2a(DaemonServeA2aArgs),
     Run,
 }
 
@@ -634,6 +677,18 @@ pub struct DaemonCatchupArgs {
 pub struct DaemonDiscoverArgs {
     #[arg(long)]
     pub workspace: Option<String>,
+}
+
+#[derive(Args, Debug, PartialEq, Default)]
+pub struct DaemonServeA2aArgs {
+    #[arg(long)]
+    pub bind: Option<String>,
+    #[arg(long)]
+    pub db: Option<String>,
+    #[arg(long)]
+    pub vault: Option<String>,
+    #[arg(long)]
+    pub graph_store: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -942,6 +997,38 @@ mod tests {
             Commands::Rca {
                 command: RcaCommands::Crystallize(args)
             } if args.run_id == "RUN-1"
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "rca", "prepare"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Rca {
+                command: RcaCommands::Prepare(_)
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "rca", "context", "--run-id", "RUN-1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Rca {
+                command: RcaCommands::Context(args)
+            } if args.run_id == "RUN-1"
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "rca", "submit-finding", "--run-id", "RUN-1", "--finding-file", "finding.json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Rca {
+                command: RcaCommands::SubmitFinding(args)
+            } if args.run_id == "RUN-1" && args.finding_file == "finding.json"
+        ));
+
+        let cli = Cli::try_parse_from(["akashic", "rca", "curate", "--run-id", "RUN-1", "--candidate-id", "CAND-1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Rca {
+                command: RcaCommands::Curate(args)
+            } if args.run_id == "RUN-1" && args.candidate_id == "CAND-1"
         ));
     }
 

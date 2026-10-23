@@ -4,15 +4,16 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::tool;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use akashic_engine::store::GraphStore;
 use akashic_rca::pipeline::{ConductorPipeline, PipelineInput};
-use akashic_rca::stage4::MockStage4Executor;
+use akashic_rca::stage4::{CandidateFinding, FindingOutcome, MockStage4Executor};
 use akashic_rca::store::StateStore;
 use akashic_rca::symbolicator::{
     symbolicate_crash, EngineSymbolResolver, InMemorySymbolResolver, SymbolResolver,
 };
+use akashic_rca::CurationVerdict;
 use akashic_vault::{
     build_resolution_node, query::query, query::query_current, query::query_lineage,
     serialize_document, Frontmatter, NodeStatus, NodeType, QueryMode, ResolutionInput, Scope,
@@ -253,31 +254,66 @@ pub struct GraphBlastRadiusParams {
     pub max_depth: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct RcaStatusParams {
     pub investigation_id: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct RcaTriggerParams {
     pub app_id: String,
     pub raw_log: String,
+    #[serde(default)]
+    pub two_phase: Option<bool>,
+    #[serde(default)]
+    pub jira_key: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub prior_resolution_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct RcaSymbolicateParams {
     pub app_id: String,
     pub raw_log: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(transform = normalize_tool_schema)]
 pub struct RcaCrystallizeParams {
     pub run_id: String,
-    pub summary: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub winning_candidate_id: Option<String>,
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub primary_hypothesis: Option<String>,
+    #[serde(default)]
+    pub falsification_attempts: Option<Vec<String>>,
+    #[serde(default)]
+    pub invalidated_hypotheses: Option<Vec<String>>,
+    #[serde(default)]
+    pub failed_attempts: Option<Vec<String>>,
+    #[serde(default)]
+    pub confidence_score: Option<f64>,
+    #[serde(default)]
+    pub remediation_proposal: Option<String>,
+    #[serde(default)]
+    pub remediation_type: Option<String>,
+    #[serde(default)]
+    pub hold_for_curation: Option<bool>,
+    #[serde(default)]
+    pub finding_file: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -680,7 +716,22 @@ impl AkashicMcpServer {
         };
 
         match store.get_workflow_run(&params.investigation_id) {
-            Ok(Some(run)) => tool_ok(&run),
+            Ok(Some(run)) => {
+                let context_packet_val: Option<serde_json::Value> = store
+                    .get_context_packet(&params.investigation_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|p| serde_json::from_str(&p).ok());
+                let candidates = store
+                    .list_candidate_findings(&params.investigation_id)
+                    .unwrap_or_default();
+                let res = serde_json::json!({
+                    "workflow_run": run,
+                    "context_packet": context_packet_val,
+                    "candidate_findings": candidates,
+                });
+                tool_ok(&res)
+            }
             Ok(None) => tool_err(format!("Investigation '{}' not found", params.investigation_id)),
             Err(e) => tool_err(format!("Failed to query investigation: {}", e)),
         }
@@ -689,14 +740,18 @@ impl AkashicMcpServer {
     // 15. RCA Trigger
     #[tool(name = "rca_trigger", description = "Trigger end-to-end RCA conductor investigation pipeline")]
     pub async fn rca_trigger(&self, Parameters(params): Parameters<RcaTriggerParams>) -> CallToolResult {
-        let state_store = if self.rca_db_path().exists() {
-            StateStore::open(self.rca_db_path())
-        } else {
-            StateStore::open_in_memory()
-        };
-        let state_store = match state_store {
+        let db_path = self.rca_db_path();
+        if let Some(parent) = db_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+        let state_store = match StateStore::open(&db_path) {
             Ok(s) => s,
-            Err(e) => return tool_err(format!("Failed to initialize state store: {}", e)),
+            Err(_) => match StateStore::open_in_memory() {
+                Ok(s) => s,
+                Err(e) => return tool_err(format!("Failed to initialize state store: {}", e)),
+            },
         };
 
         let graph_path = self.graph_db_path();
@@ -706,35 +761,65 @@ impl AkashicMcpServer {
             None
         };
 
-        let pipeline = ConductorPipeline::new(state_store, MockStage4Executor::new());
+        let pipeline = ConductorPipeline::new(state_store.clone(), MockStage4Executor::new());
         let input = PipelineInput {
-            run_id: None,
+            run_id: params.run_id,
             legacy_session_id: None,
-            jira_key: "MCP-AUTOTRIGGER".to_string(),
+            jira_key: params.jira_key.unwrap_or_else(|| "MCP-AUTOTRIGGER".to_string()),
             app_id: params.app_id,
             device: "mcp-device".to_string(),
             android_version: "14".to_string(),
             raw_logs: params.raw_log,
             vault_path: self.vault_path.clone(),
             graph_store,
-            prior_resolution_id: None,
+            prior_resolution_id: params.prior_resolution_id,
             policy_path: None,
         };
 
-        match pipeline.run(input).await {
-            Ok(ctx) => {
-                let res = serde_json::json!({
-                    "run_id": ctx.run_id,
-                    "incident_id": ctx.incident_id,
-                    "deduplicated": ctx.deduplicated,
-                    "crash_signature": ctx.crash_signature,
-                    "incident_node_id": ctx.incident_node_id,
-                    "evidence_node_id": ctx.evidence_node_id,
-                    "resolution_node_id": ctx.resolution_node_id,
-                });
-                tool_ok(&res)
+        let two_phase = params.two_phase.unwrap_or(true);
+        if two_phase {
+            match pipeline.prepare_investigation(input) {
+                Ok((ctx, packet_opt)) => {
+                    let status = if ctx.deduplicated {
+                        "DEDUPLICATED"
+                    } else {
+                        "AWAITING_REASONING"
+                    };
+                    let res = serde_json::json!({
+                        "run_id": ctx.run_id,
+                        "incident_id": ctx.incident_id,
+                        "status": status,
+                        "deduplicated": ctx.deduplicated,
+                        "crash_signature": ctx.crash_signature,
+                        "context_packet": packet_opt,
+                    });
+                    tool_ok(&res)
+                }
+                Err(e) => tool_err(format!("RCA prepare investigation failed: {}", e)),
             }
-            Err(e) => tool_err(format!("RCA pipeline execution failed: {}", e)),
+        } else {
+            match pipeline.run(input).await {
+                Ok(ctx) => {
+                    let packet_val: Option<serde_json::Value> = state_store
+                        .get_context_packet(&ctx.run_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|p| serde_json::from_str(&p).ok());
+                    let res = serde_json::json!({
+                        "run_id": ctx.run_id,
+                        "incident_id": ctx.incident_id,
+                        "status": if ctx.deduplicated { "DEDUPLICATED" } else { "COMPLETED" },
+                        "deduplicated": ctx.deduplicated,
+                        "crash_signature": ctx.crash_signature,
+                        "incident_node_id": ctx.incident_node_id,
+                        "evidence_node_id": ctx.evidence_node_id,
+                        "resolution_node_id": ctx.resolution_node_id,
+                        "context_packet": packet_val,
+                    });
+                    tool_ok(&res)
+                }
+                Err(e) => tool_err(format!("RCA pipeline execution failed: {}", e)),
+            }
         }
     }
 
@@ -767,6 +852,100 @@ impl AkashicMcpServer {
             return tool_err(format!("Failed to create vault directory: {}", e));
         }
 
+        let db_path = self.rca_db_path();
+        let state_store = if db_path.exists() {
+            StateStore::open(&db_path).ok()
+        } else {
+            None
+        };
+
+        if let Some(store) = state_store {
+            let pipeline = ConductorPipeline::new(store.clone(), MockStage4Executor::new());
+
+            // If winning_candidate_id is set, adjudicate
+            if let Some(ref winning_id) = params.winning_candidate_id {
+                match pipeline.curate_investigation(&params.run_id, winning_id, &self.vault_path) {
+                    Ok((_ctx, report)) => return tool_ok(&report),
+                    Err(e) => return tool_err(format!("Curation adjudication failed: {}", e)),
+                }
+            }
+
+            // Check if run exists in state_store
+            if store.get_workflow_run(&params.run_id).ok().flatten().is_some()
+                || params.primary_hypothesis.is_some()
+                || params.finding_file.is_some()
+            {
+                let finding_result: Result<CandidateFinding, String> = if let Some(ref file_path) = params.finding_file {
+                    std::fs::read_to_string(file_path)
+                        .map_err(|e| format!("Failed to read finding file: {}", e))
+                        .and_then(|content| {
+                            serde_json::from_str::<CandidateFinding>(&content)
+                                .map_err(|e| format!("Failed to parse CandidateFinding JSON: {}", e))
+                        })
+                } else {
+                    let outcome = match params.outcome.as_deref().unwrap_or("resolved").to_ascii_lowercase().as_str() {
+                        "inconclusive" => FindingOutcome::Inconclusive,
+                        _ => FindingOutcome::Resolved,
+                    };
+                    let primary = params
+                        .primary_hypothesis
+                        .or_else(|| params.summary.clone())
+                        .unwrap_or_else(|| "Investigation finding".to_string());
+                    let remediation = params
+                        .remediation_proposal
+                        .or_else(|| params.summary.clone())
+                        .unwrap_or_else(|| "Remediation applied".to_string());
+                    let falsification = params.falsification_attempts.unwrap_or_default();
+                    let invalidated = params.invalidated_hypotheses.unwrap_or_default();
+                    let failed = params.failed_attempts.unwrap_or_default();
+                    let conf = params.confidence_score.unwrap_or(1.0);
+                    let rem_type = params.remediation_type.or_else(|| Some("permanent_fix".to_string()));
+                    let hold = params.hold_for_curation.unwrap_or(false);
+
+                    Ok(CandidateFinding {
+                        candidate_id: params.candidate_id,
+                        agent_id: params.agent_id,
+                        run_id: Some(params.run_id.clone()),
+                        storm_candidate_id: None,
+                        outcome,
+                        primary_hypothesis: primary,
+                        falsification_attempts: falsification,
+                        invalidated_hypotheses: invalidated,
+                        failed_attempts: failed,
+                        confidence_score: conf,
+                        remediation_proposal: remediation,
+                        remediation_type: rem_type,
+                        supersedes_resolution_id: None,
+                        hold_for_curation: hold,
+                        affected_symbols: vec![],
+                    })
+                };
+
+                let finding = match finding_result {
+                    Ok(f) => f,
+                    Err(e) => return tool_err(e),
+                };
+
+                match pipeline.submit_finding(&params.run_id, &finding, &self.vault_path) {
+                    Ok((_ctx, report)) => {
+                        if report.verdict == CurationVerdict::Rejected {
+                            let issues_str = report
+                                .issues
+                                .iter()
+                                .map(|i| format!("{}: {}", i.invariant, i.message))
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            return tool_err(format!("Curation gate rejected finding: {}", issues_str));
+                        }
+                        return tool_ok(&report);
+                    }
+                    Err(e) => return tool_err(format!("Submit finding failed: {}", e)),
+                }
+            }
+        }
+
+        // Legacy fallback
+        let summary = params.summary.unwrap_or_default();
         let res_input = ResolutionInput {
             id: format!("RES-{}", params.run_id),
             title: format!("Resolution for {}", params.run_id),
@@ -777,17 +956,40 @@ impl AkashicMcpServer {
             scope: Scope::new(),
             external_refs: None,
             relations: vec![],
-            body: params.summary,
+            body: summary,
         };
 
         match build_resolution_node(res_input) {
             Ok(artifact) => {
-                let target_dir = self.vault_path.join("resolutions");
-                let _ = std::fs::create_dir_all(&target_dir);
-                let target_path = target_dir.join(format!("{}.md", artifact.id));
-                match std::fs::write(&target_path, &artifact.rendered_markdown) {
+                let rel_path_str = format!("resolutions/{}.md", artifact.id);
+                let target_path = self.vault_path.join(&rel_path_str);
+                let (action, before_sha256, old_content) = if target_path.exists() {
+                    let old = std::fs::read_to_string(&target_path).unwrap_or_default();
+                    let sha = akashic_vault::sha256_hex(old.as_bytes());
+                    (akashic_vault::ChangeAction::Modify, sha, old)
+                } else {
+                    (akashic_vault::ChangeAction::Create, String::new(), String::new())
+                };
+
+                let diff = akashic_vault::generate_unified_diff(&rel_path_str, &old_content, &artifact.rendered_markdown);
+                let change = akashic_vault::PlannedFileChange {
+                    path: rel_path_str,
+                    action,
+                    diff,
+                    before_sha256,
+                    after_sha256: akashic_vault::sha256_hex(artifact.rendered_markdown.as_bytes()),
+                    new_content: Some(artifact.rendered_markdown),
+                };
+
+                let plan = akashic_vault::MigrationPlan {
+                    plan_version: "1.0.0".to_string(),
+                    vault_root: self.vault_path.to_string_lossy().to_string(),
+                    changes: vec![change],
+                };
+
+                match akashic_vault::apply_plan_with_validator(&self.vault_path, &plan, |_| Ok(())) {
                     Ok(_) => tool_text(format!("Crystallized resolution to {}", target_path.display())),
-                    Err(e) => tool_err(format!("Failed to write resolution node: {}", e)),
+                    Err(e) => tool_err(format!("Failed to apply migration plan: {}", e)),
                 }
             }
             Err(e) => tool_err(format!("Failed to build resolution node: {}", e)),

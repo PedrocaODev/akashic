@@ -22,6 +22,8 @@ pub struct WorkflowRunRecord {
     pub created_at: i64,
     pub updated_at: i64,
     pub context_json: String,
+    #[serde(default)]
+    pub context_packet_json: Option<String>,
 }
 
 pub type SessionRecord = WorkflowRunRecord;
@@ -70,6 +72,22 @@ pub struct DaemonWatermarkRecord {
     pub last_processed_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CandidateFindingRecord {
+    pub candidate_id: String,
+    pub run_id: String,
+    pub storm_candidate_id: Option<String>,
+    pub outcome: String,
+    pub summary: String,
+    pub remediation_proposal: String,
+    pub confidence_score: f64,
+    pub affected_symbols_json: String,
+    pub finding_json: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Clone)]
 pub struct StateStore {
     conn: Arc<Mutex<Connection>>,
@@ -105,7 +123,8 @@ impl StateStore {
                 current_stage TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                context_json TEXT NOT NULL
+                context_json TEXT NOT NULL,
+                context_packet_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS stage_checkpoints (
@@ -142,10 +161,28 @@ impl StateStore {
                 last_processed_id TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS candidate_findings (
+                candidate_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                storm_candidate_id TEXT,
+                outcome TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                remediation_proposal TEXT NOT NULL,
+                confidence_score REAL NOT NULL,
+                affected_symbols_json TEXT NOT NULL,
+                finding_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON stage_checkpoints(run_id, checkpoint_id);
             CREATE INDEX IF NOT EXISTS idx_storm_signatures_seen ON storm_signatures(crash_signature, last_seen_at);
-            CREATE INDEX IF NOT EXISTS idx_incident_cl_change ON incident_cl_map(gerrit_change_id);",
+            CREATE INDEX IF NOT EXISTS idx_incident_cl_change ON incident_cl_map(gerrit_change_id);
+            CREATE INDEX IF NOT EXISTS idx_candidate_findings_run ON candidate_findings(run_id);",
         )?;
+
+        let _ = conn.execute("ALTER TABLE workflow_runs ADD COLUMN context_packet_json TEXT;", []);
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -159,8 +196,8 @@ impl StateStore {
             .lock()
             .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
         conn.execute(
-            "INSERT INTO workflow_runs (run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO workflow_runs (run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json, context_packet_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 run.run_id,
                 run.jira_key,
@@ -170,6 +207,7 @@ impl StateStore {
                 run.created_at,
                 run.updated_at,
                 run.context_json,
+                run.context_packet_json,
             ],
         )?;
         Ok(())
@@ -197,13 +235,46 @@ impl StateStore {
         Ok(())
     }
 
+    pub fn save_context_packet(&self, run_id: &str, packet_json: &str) -> Result<(), RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let updated_at = current_timestamp_secs();
+        conn.execute(
+            "UPDATE workflow_runs
+             SET context_packet_json = ?1, updated_at = ?2
+             WHERE run_id = ?3",
+            rusqlite::params![packet_json, updated_at, run_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_context_packet(&self, run_id: &str) -> Result<Option<String>, RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let mut stmt = conn.prepare(
+            "SELECT context_packet_json
+             FROM workflow_runs
+             WHERE run_id = ?1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![run_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(row.get(0)?)
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn get_workflow_run(&self, run_id: &str) -> Result<Option<WorkflowRunRecord>, RcaError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
         let mut stmt = conn.prepare(
-            "SELECT run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json
+            "SELECT run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json, context_packet_json
              FROM workflow_runs
              WHERE run_id = ?1",
         )?;
@@ -218,6 +289,7 @@ impl StateStore {
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
                 context_json: row.get(7)?,
+                context_packet_json: row.get(8)?,
             }))
         } else {
             Ok(None)
@@ -230,7 +302,7 @@ impl StateStore {
             .lock()
             .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
         let mut stmt = conn.prepare(
-            "SELECT run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json
+            "SELECT run_id, jira_key, crash_signature, status, current_stage, created_at, updated_at, context_json, context_packet_json
              FROM workflow_runs
              ORDER BY updated_at DESC",
         )?;
@@ -244,6 +316,7 @@ impl StateStore {
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
                 context_json: row.get(7)?,
+                context_packet_json: row.get(8)?,
             })
         })?;
         let mut runs = Vec::new();
@@ -327,6 +400,111 @@ impl StateStore {
         } else {
             Ok(None)
         }
+    }
+
+    // Candidate finding operations
+    pub fn stage_candidate_finding(&self, record: &CandidateFindingRecord) -> Result<(), RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        conn.execute(
+            "INSERT INTO candidate_findings (
+                candidate_id, run_id, storm_candidate_id, outcome, summary,
+                remediation_proposal, confidence_score, affected_symbols_json,
+                finding_json, status, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(candidate_id) DO UPDATE SET
+                storm_candidate_id = excluded.storm_candidate_id,
+                outcome = excluded.outcome,
+                summary = excluded.summary,
+                remediation_proposal = excluded.remediation_proposal,
+                confidence_score = excluded.confidence_score,
+                affected_symbols_json = excluded.affected_symbols_json,
+                finding_json = excluded.finding_json,
+                status = excluded.status,
+                updated_at = excluded.updated_at",
+            rusqlite::params![
+                record.candidate_id,
+                record.run_id,
+                record.storm_candidate_id,
+                record.outcome,
+                record.summary,
+                record.remediation_proposal,
+                record.confidence_score,
+                record.affected_symbols_json,
+                record.finding_json,
+                record.status,
+                record.created_at,
+                record.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_candidate_findings(&self, run_id: &str) -> Result<Vec<CandidateFindingRecord>, RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let mut stmt = conn.prepare(
+            "SELECT candidate_id, run_id, storm_candidate_id, outcome, summary,
+                    remediation_proposal, confidence_score, affected_symbols_json,
+                    finding_json, status, created_at, updated_at
+             FROM candidate_findings
+             WHERE run_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![run_id], |row| {
+            Ok(CandidateFindingRecord {
+                candidate_id: row.get(0)?,
+                run_id: row.get(1)?,
+                storm_candidate_id: row.get(2)?,
+                outcome: row.get(3)?,
+                summary: row.get(4)?,
+                remediation_proposal: row.get(5)?,
+                confidence_score: row.get(6)?,
+                affected_symbols_json: row.get(7)?,
+                finding_json: row.get(8)?,
+                status: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for r in rows {
+            results.push(r?);
+        }
+        Ok(results)
+    }
+
+    pub fn update_candidate_finding_status(&self, candidate_id: &str, status: &str) -> Result<(), RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let now = current_timestamp_secs();
+        conn.execute(
+            "UPDATE candidate_findings SET status = ?1, updated_at = ?2 WHERE candidate_id = ?3",
+            rusqlite::params![status, now, candidate_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn adjudicate_candidate_findings(&self, run_id: &str, winning_candidate_id: &str) -> Result<(), RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let now = current_timestamp_secs();
+        conn.execute(
+            "UPDATE candidate_findings
+             SET status = CASE WHEN candidate_id = ?1 THEN 'ACCEPTED' ELSE 'REJECTED' END,
+                 updated_at = ?2
+             WHERE run_id = ?3",
+            rusqlite::params![winning_candidate_id, now, run_id],
+        )?;
+        Ok(())
     }
 
     // Storm signature operations
@@ -449,6 +627,19 @@ impl StateStore {
         } else {
             Err(RcaError::Session(format!("Storm signature not found: {}", signature)))
         }
+    }
+
+    pub fn update_storm_active_run(&self, crash_signature: &str, new_run_id: &str) -> Result<(), RcaError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RcaError::Session(format!("Mutex poisoned: {}", e)))?;
+        let now = current_timestamp_secs();
+        conn.execute(
+            "UPDATE storm_signatures SET active_run_id = ?1, last_seen_at = ?2 WHERE crash_signature = ?3",
+            rusqlite::params![new_run_id, now, crash_signature],
+        )?;
+        Ok(())
     }
 
     // Incident CL map operations

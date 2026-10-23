@@ -1,19 +1,32 @@
-use crate::stage4::{MockStage4Executor, Stage4Executor, Stage4Output, Stage4Request};
+use crate::curation::{
+    BlastRadiusContext, CurationGate, CurationReport, CurationVerdict, InvestigationContextPacket,
+    PriorResolutionSummary,
+};
+use crate::stage4::{
+    CandidateFinding, FindingOutcome, MockStage4Executor, Stage4Executor, Stage4Output,
+    Stage4Request,
+};
 use crate::store::{
-    current_timestamp_secs, IncidentClRecord, StateStore, StormGateOutcome, WorkflowRunRecord,
+    current_timestamp_secs, CandidateFindingRecord, IncidentClRecord, StateStore,
+    StormGateOutcome, WorkflowRunRecord,
 };
 use crate::RcaError;
 use akashic_sanitize::{LogProfile, SanitizerProfile};
 use akashic_vault::crystallizer::{
-    build_evidence_node, build_incident_node, build_resolution_node, write_vault_node,
-    EvidenceInput, IncidentInput, ResolutionInput,
+    build_evidence_node, build_resolution_node, write_vault_node,
+    EvidenceInput, ResolutionInput,
 };
 use akashic_vault::frontmatter::{
-    NodeStatus, Relation, RelationType, RemediationType, Scope,
+    NodeStatus, RelationType, RemediationType, Scope,
+};
+use akashic_vault::migrator::{
+    apply_plan_with_validator, generate_unified_diff, sha256_hex, ChangeAction, MigrationPlan,
+    PlannedFileChange,
 };
 use akashic_vault::parser::serialize_document;
 use akashic_vault::VaultGraph;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +97,72 @@ pub enum GerritEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkflowStage {
+    Created,
+    Sanitized,
+    Symbolicated,
+    AwaitingReasoning,
+    HypothesisFalsified,
+    AwaitingCuration,
+    Crystallized,
+    Inconclusive,
+    Resolved,
+}
+
+impl WorkflowStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Sanitized => "Sanitized",
+            Self::Symbolicated => "Symbolicated",
+            Self::AwaitingReasoning => "AwaitingReasoning",
+            Self::HypothesisFalsified => "HypothesisFalsified",
+            Self::AwaitingCuration => "AwaitingCuration",
+            Self::Crystallized => "Crystallized",
+            Self::Inconclusive => "Inconclusive",
+            Self::Resolved => "Resolved",
+        }
+    }
+}
+
+impl std::fmt::Display for WorkflowStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkflowStatus {
+    Running,
+    AwaitingReasoning,
+    AwaitingCuration,
+    Inconclusive,
+    Completed,
+    Deduplicated,
+    Failed,
+}
+
+impl WorkflowStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "Running",
+            Self::AwaitingReasoning => "AwaitingReasoning",
+            Self::AwaitingCuration => "AwaitingCuration",
+            Self::Inconclusive => "Inconclusive",
+            Self::Completed => "Completed",
+            Self::Deduplicated => "Deduplicated",
+            Self::Failed => "Failed",
+        }
+    }
+}
+
+impl std::fmt::Display for WorkflowStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 pub struct ConductorPipeline<E: Stage4Executor = MockStage4Executor> {
     state_store: StateStore,
     stage4_executor: E,
@@ -125,6 +204,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
             created_at: now,
             updated_at: now,
             context_json: ctx_json.clone(),
+            context_packet_json: None,
         };
 
         if self.state_store.get_workflow_run(&context.run_id)?.is_none() {
@@ -313,188 +393,140 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
 
     // Stage 5: Crystallize & akashic-lint Gate
     pub fn run_stage5(&self, context: &mut PipelineContext) -> Result<(), RcaError> {
-        let vault_root = Path::new(&context.vault_path);
+        let vault_root = PathBuf::from(&context.vault_path);
 
-        let incident_id = context
-            .incident_id
-            .clone()
-            .unwrap_or_else(|| format!("INC-{}", context.jira_key));
-        let evidence_id = format!("EVD-{}-STACK", context.jira_key);
-        let resolution_id = format!("RES-{}-01", context.jira_key);
-
-        let mut scope = Scope::new();
-        scope.insert("app".to_string(), context.app_id.clone());
-        if !context.device.is_empty() {
-            scope.insert("device".to_string(), context.device.clone());
-        }
-        if !context.android_version.is_empty() {
-            scope.insert("android_version".to_string(), context.android_version.clone());
-        }
-        if let Some(ref sym) = context.symbolication_output {
-            if let Some(ref fault) = sym.faulting_symbol {
-                scope.insert("repo".to_string(), fault.repo_name.clone());
-            }
-        }
-
-        let primary_hyp = context
-            .stage4_output
+        let packet = match self.state_store.get_context_packet(&context.run_id)? {
+            Some(pkt_json) => serde_json::from_str(&pkt_json)?,
+            None => self.assemble_context_packet(context, &vault_root)?,
+        };
+        let cand_id = format!("CAND-{}", &context.run_id);
+        let affected = context
+            .symbolication_output
             .as_ref()
-            .map(|o| o.primary_hypothesis.clone())
-            .unwrap_or_else(|| "Incident investigation".to_string());
-
-        let invalidated_hyps: Vec<String> = context
+            .and_then(|s| s.faulting_symbol.as_ref())
+            .map(|f| vec![f.symbol.clone()])
+            .unwrap_or_default();
+        let mut finding = context
             .stage4_output
             .as_ref()
             .map(|o| {
-                o.invalidated_hypotheses
-                    .iter()
-                    .map(|h| format!("{}: {}", h.hypothesis_id, h.description))
-                    .collect()
+                o.clone().into_candidate_finding(
+                    cand_id.clone(),
+                    context.run_id.clone(),
+                    FindingOutcome::Resolved,
+                    affected.clone(),
+                    Some("permanent_fix".to_string()),
+                    context.prior_resolution_id.clone(),
+                )
             })
-            .unwrap_or_default();
-
-        let failed_attempts: Vec<String> = context
-            .stage4_output
-            .as_ref()
-            .map(|o| o.failed_attempts.clone())
-            .unwrap_or_default();
-
-        let falsifications = context
-            .stage4_output
-            .as_ref()
-            .map(|o| o.falsification_attempts.join("\n"))
-            .unwrap_or_default();
-
-        let remediation = context
-            .stage4_output
-            .as_ref()
-            .map(|o| o.remediation_proposal.clone())
-            .unwrap_or_default();
-
-        // 1. INCIDENT node
-        let incident_body = format!(
-            "### Hypothesis\n{}\n\n### Falsification Attempts\n{}\n\n### Remediation Proposal\n{}\n",
-            primary_hyp, falsifications, remediation
-        );
-        let mut incident_artifact = build_incident_node(IncidentInput {
-            id: incident_id.clone(),
-            title: format!("Crash in {}: {}", context.app_id, primary_hyp),
-            crash_signature: context.crash_signature.clone().unwrap_or_default(),
-            status: Some(NodeStatus::Active),
-            scope: scope.clone(),
-            external_refs: None,
-            relations: vec![Relation {
-                target: evidence_id.clone(),
-                relation_type: RelationType::SupportedBy,
-                evidence: None,
-                scope: scope.clone(),
-            }],
-            body: incident_body,
-        })?;
-        incident_artifact.frontmatter.valid_from = Some("2026-10-19".to_string());
-        incident_artifact.frontmatter.invalidated_hypotheses = invalidated_hyps.clone();
-        incident_artifact.frontmatter.failed_attempts = failed_attempts.clone();
-        incident_artifact.rendered_markdown =
-            serialize_document(&incident_artifact.frontmatter, &incident_artifact.body)?;
-        write_vault_node(vault_root, "incidents", &incident_artifact)?;
-
-        // 2. EVIDENCE node
-        let stack_trace_body = context
-            .symbolication_output
-            .as_ref()
-            .map(|o| format!("```\n{}\n```", o.symbolicated_stack_trace))
-            .unwrap_or_else(|| "```\nNo stack trace\n```".to_string());
-        let mut evidence_artifact = build_evidence_node(EvidenceInput {
-            id: evidence_id.clone(),
-            title: format!("Symbolicated stack trace for {}", context.jira_key),
-            incident_id: Some(incident_id.clone()),
-            status: Some(NodeStatus::Active),
-            scope: scope.clone(),
-            invalidated_hypotheses: invalidated_hyps.clone(),
-            failed_attempts: failed_attempts.clone(),
-            relations: vec![Relation {
-                target: incident_id.clone(),
-                relation_type: RelationType::Substantiates,
-                evidence: None,
-                scope: scope.clone(),
-            }],
-            body: stack_trace_body,
-        })?;
-        evidence_artifact.frontmatter.valid_from = Some("2026-10-19".to_string());
-        evidence_artifact.rendered_markdown =
-            serialize_document(&evidence_artifact.frontmatter, &evidence_artifact.body)?;
-        write_vault_node(vault_root, "evidence", &evidence_artifact)?;
-
-        // 3. RESOLUTION node
-        let mut res_relations = vec![Relation {
-            target: incident_id.clone(),
-            relation_type: RelationType::Resolves,
-            evidence: Some(evidence_id.clone()),
-            scope: scope.clone(),
-        }];
-
-        if let Some(ref prior_id) = context.prior_resolution_id {
-            res_relations.push(Relation {
-                target: prior_id.clone(),
-                relation_type: RelationType::Supersedes,
-                evidence: Some(evidence_id.clone()),
-                scope: scope.clone(),
+            .unwrap_or_else(|| CandidateFinding {
+                candidate_id: Some(cand_id),
+                agent_id: None,
+                run_id: Some(context.run_id.clone()),
+                storm_candidate_id: None,
+                outcome: FindingOutcome::Resolved,
+                primary_hypothesis: "Incident investigation".to_string(),
+                falsification_attempts: vec!["Empirical analysis".to_string()],
+                invalidated_hypotheses: vec![],
+                failed_attempts: vec![],
+                confidence_score: 1.0,
+                remediation_proposal: "Permanent fix applied".to_string(),
+                remediation_type: Some("permanent_fix".to_string()),
+                supersedes_resolution_id: context.prior_resolution_id.clone(),
+                hold_for_curation: false,
+                affected_symbols: affected,
             });
+
+        if context.prior_resolution_id.is_some() && finding.supersedes_resolution_id.is_none() {
+            finding.supersedes_resolution_id = context.prior_resolution_id.clone();
         }
 
-        let resolution_body = format!("### Remediation Plan\n{}\n", remediation);
-        let mut resolution_artifact = build_resolution_node(ResolutionInput {
-            id: resolution_id.clone(),
-            title: format!("Resolution for {}", context.jira_key),
-            incident_id: Some(incident_id.clone()),
-            remediation_type: RemediationType::PermanentFix,
-            status: Some(NodeStatus::Active),
-            abandoned_reason: None,
-            scope: scope.clone(),
-            external_refs: None,
-            relations: res_relations,
-            body: resolution_body,
-        })?;
-        resolution_artifact.frontmatter.valid_from = Some("2026-10-19".to_string());
-        resolution_artifact.rendered_markdown =
-            serialize_document(&resolution_artifact.frontmatter, &resolution_artifact.body)?;
-        write_vault_node(vault_root, "resolutions", &resolution_artifact)?;
-
-        // Lint gate: validate vault graph
-        let graph = VaultGraph::from_dir(vault_root)?;
-        let report = akashic_lint::lint_vault(&graph);
-        if !report.valid {
-            return Err(RcaError::VaultLintFailed(
-                report.error_count,
-                report.issues,
-            ));
+        let report = CurationGate::validate(&packet, &finding, &vault_root)?;
+        if report.verdict == CurationVerdict::Rejected {
+            if !report.lint_issues.is_empty() {
+                let err_count = report
+                    .lint_issues
+                    .iter()
+                    .filter(|i| i.severity == akashic_lint::Severity::Error)
+                    .count();
+                return Err(RcaError::VaultLintFailed(err_count, report.lint_issues));
+            }
+            let err_msg = report
+                .issues
+                .iter()
+                .map(|i| i.message.clone())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RcaError::Curation(format!(
+                "Curation gate rejected finding: {}",
+                err_msg
+            )));
         }
 
-        context.incident_node_id = Some(incident_id.clone());
-        context.evidence_node_id = Some(evidence_id);
-        context.resolution_node_id = Some(resolution_id.clone());
+        self.apply_crystallization(context, &report, finding.outcome, &vault_root)?;
 
-        if let Ok(Some(mut cl_rec)) = self.state_store.get_incident_cl(&incident_id) {
-            cl_rec.resolution_id = resolution_id;
-            if cl_rec.repo_name.is_empty() {
-                if let Some(repo) = scope.get("repo") {
-                    cl_rec.repo_name = repo.clone();
+        Ok(())
+    }
+
+    fn apply_crystallization(
+        &self,
+        context: &mut PipelineContext,
+        report: &CurationReport,
+        outcome: FindingOutcome,
+        vault_path: &Path,
+    ) -> Result<(), RcaError> {
+        if let Some(ref plan) = report.migration_plan {
+            apply_plan_with_validator(vault_path, plan, |_| Ok(()))?;
+        }
+
+        context.incident_node_id = report.incident_node_id.clone();
+        context.evidence_node_id = report.evidence_node_id.clone();
+        context.resolution_node_id = report.resolution_node_id.clone();
+
+        if let Some(ref incident_id) = context.incident_node_id {
+            if let Some(ref resolution_id) = context.resolution_node_id {
+                if let Ok(Some(mut cl_rec)) = self.state_store.get_incident_cl(incident_id) {
+                    cl_rec.resolution_id = resolution_id.clone();
+                    if cl_rec.repo_name.is_empty() {
+                        if let Some(ref sym) = context.symbolication_output {
+                            if let Some(ref fault) = sym.faulting_symbol {
+                                cl_rec.repo_name = fault.repo_name.clone();
+                            }
+                        }
+                    }
+                    cl_rec.updated_at = current_timestamp_secs();
+                    let _ = self.state_store.upsert_incident_cl(&cl_rec);
                 }
             }
-            cl_rec.updated_at = current_timestamp_secs();
-            let _ = self.state_store.upsert_incident_cl(&cl_rec);
         }
 
-        let ctx_json = serde_json::to_string(&context)?;
-        self.state_store.update_workflow_run(
-            &context.run_id,
-            "CRYSTALLIZED",
-            "IN_PROGRESS",
-            context.crash_signature.as_deref(),
-            &ctx_json,
-        )?;
-        self.state_store
-            .save_checkpoint(&context.run_id, "CRYSTALLIZED", &ctx_json)?;
+        match outcome {
+            FindingOutcome::Inconclusive => {
+                let ctx_json = serde_json::to_string(&context)?;
+                self.state_store.update_workflow_run(
+                    &context.run_id,
+                    "INCONCLUSIVE",
+                    "INCONCLUSIVE",
+                    context.crash_signature.as_deref(),
+                    &ctx_json,
+                )?;
+                self.state_store
+                    .save_checkpoint(&context.run_id, "INCONCLUSIVE", &ctx_json)?;
+            }
+            FindingOutcome::Resolved => {
+                let ctx_json = serde_json::to_string(&context)?;
+                self.state_store.update_workflow_run(
+                    &context.run_id,
+                    "CRYSTALLIZED",
+                    "IN_PROGRESS",
+                    context.crash_signature.as_deref(),
+                    &ctx_json,
+                )?;
+                self.state_store
+                    .save_checkpoint(&context.run_id, "CRYSTALLIZED", &ctx_json)?;
+                self.run_stage6(context)?;
+            }
+        }
 
         Ok(())
     }
@@ -513,6 +545,392 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
             .save_checkpoint(&context.run_id, "RESOLVED", &ctx_json)?;
 
         Ok(())
+    }
+
+    // Assemble Stage 3.5 InvestigationContextPacket
+    pub fn assemble_context_packet(
+        &self,
+        context: &PipelineContext,
+        vault_path: &Path,
+    ) -> Result<InvestigationContextPacket, RcaError> {
+        let incident_id = context
+            .incident_id
+            .clone()
+            .unwrap_or_else(|| format!("INC-{}", context.jira_key));
+
+        let mut historical_invalidated_hypotheses = Vec::new();
+        let mut historical_failed_attempts = Vec::new();
+        let mut prior_resolutions = Vec::new();
+
+        let mut seen_hypotheses = HashSet::new();
+        let mut seen_attempts = HashSet::new();
+        let mut seen_resolutions = HashSet::new();
+
+        if vault_path.exists() {
+            let scan_dirs = ["incidents", "evidence", "resolutions"];
+            for dir_name in &scan_dirs {
+                let dir_path = vault_path.join(dir_name);
+                if dir_path.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&dir_path) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                if let Ok(doc) = akashic_vault::parse_markdown_file(vault_path, &path) {
+                                    let is_match = doc.frontmatter.id == incident_id
+                                        || context.prior_resolution_id.as_deref() == Some(&doc.frontmatter.id)
+                                        || doc.frontmatter.scope.get("app") == Some(&context.app_id)
+                                        || doc.frontmatter.relations.iter().any(|r| {
+                                            r.target == incident_id
+                                                || context.prior_resolution_id.as_deref() == Some(&r.target)
+                                        });
+
+                                    if is_match {
+                                        for h in doc.frontmatter.invalidated_hypotheses {
+                                            if seen_hypotheses.insert(h.clone()) {
+                                                historical_invalidated_hypotheses.push(h);
+                                            }
+                                        }
+                                        for f in doc.frontmatter.failed_attempts {
+                                            if seen_attempts.insert(f.clone()) {
+                                                historical_failed_attempts.push(f);
+                                            }
+                                        }
+                                        if *dir_name == "resolutions" || doc.frontmatter.id.starts_with("RES-") {
+                                            if seen_resolutions.insert(doc.frontmatter.id.clone()) {
+                                                let res_summary = PriorResolutionSummary {
+                                                    resolution_id: doc.frontmatter.id.clone(),
+                                                    status: format!("{:?}", doc.frontmatter.status).to_lowercase(),
+                                                    remediation_type: doc
+                                                        .frontmatter
+                                                        .remediation_type
+                                                        .map(|r| format!("{:?}", r).to_lowercase()),
+                                                    abandoned_reason: doc.frontmatter.abandoned_reason.clone(),
+                                                };
+                                                prior_resolutions.push(res_summary);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut blast_radius = None;
+        if let Some(ref gs_path_str) = context.graph_store {
+            if let Some(ref sym) = context
+                .symbolication_output
+                .as_ref()
+                .and_then(|s| s.faulting_symbol.as_ref())
+            {
+                if let Ok(store) = akashic_engine::store::GraphStore::open(Path::new(gs_path_str)) {
+                    if let Ok(report) = akashic_engine::analytics::blast_radius(
+                        &store,
+                        &sym.repo_name,
+                        &[sym.symbol.clone()],
+                        2,
+                    ) {
+                        blast_radius = Some(BlastRadiusContext {
+                            repo_name: sym.repo_name.clone(),
+                            seed_symbol_ids: vec![sym.symbol.clone()],
+                            upstream_callers: report
+                                .upstream_callers
+                                .into_iter()
+                                .map(|s| s.id)
+                                .collect(),
+                            downstream_dependencies: report
+                                .downstream_dependencies
+                                .into_iter()
+                                .map(|s| s.id)
+                                .collect(),
+                            impacted_communities: report
+                                .impacted_communities
+                                .into_iter()
+                                .map(|c| c.community_id)
+                                .collect(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let symbolication = context
+            .symbolication_output
+            .clone()
+            .unwrap_or_default();
+
+        let sanitized_logs = context
+            .sanitized_logs
+            .clone()
+            .unwrap_or_else(|| context.raw_logs.clone());
+
+        let redactions_count = context.redactions_count;
+
+        let packet = InvestigationContextPacket {
+            run_id: context.run_id.clone(),
+            incident_id,
+            jira_key: context.jira_key.clone(),
+            app_id: context.app_id.clone(),
+            device: context.device.clone(),
+            android_version: context.android_version.clone(),
+            crash_signature: context.crash_signature.clone().unwrap_or_default(),
+            sanitized_logs,
+            redactions_count,
+            symbolication,
+            blast_radius,
+            historical_invalidated_hypotheses,
+            historical_failed_attempts,
+            prior_resolutions,
+            policy_path: context.policy_path.as_ref().map(PathBuf::from),
+        };
+
+        Ok(packet)
+    }
+
+    // Phase A: Stages 1-3.5 prepare investigation
+    pub fn prepare_investigation(
+        &self,
+        input: PipelineInput,
+    ) -> Result<(PipelineContext, Option<InvestigationContextPacket>), RcaError> {
+        let run_id = input
+            .run_id
+            .or(input.legacy_session_id)
+            .unwrap_or_else(|| {
+                format!(
+                    "run-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos()
+                )
+            });
+
+        let mut context = PipelineContext {
+            run_id: run_id.clone(),
+            jira_key: input.jira_key.clone(),
+            app_id: input.app_id.clone(),
+            device: input.device.clone(),
+            android_version: input.android_version.clone(),
+            raw_logs: input.raw_logs.clone(),
+            vault_path: input.vault_path.to_string_lossy().to_string(),
+            graph_store: input.graph_store.map(|p| p.to_string_lossy().to_string()),
+            prior_resolution_id: input.prior_resolution_id,
+            policy_path: input.policy_path.map(|p| p.to_string_lossy().to_string()),
+            ..PipelineContext::default()
+        };
+
+        // Stage 1: Ingest
+        self.run_stage1(&mut context)?;
+
+        // Stage 2: Sanitize
+        self.run_stage2(&mut context)?;
+
+        // Stage 3: Symbolicate & Storm Gate Dedup
+        let is_dedup = self.run_stage3(&mut context)?;
+        if is_dedup {
+            return Ok((context, None));
+        }
+
+        // Stage 3.5: Assemble context packet & checkpoint AWAITING_REASONING
+        let vault_path = Path::new(&context.vault_path);
+        let packet = self.assemble_context_packet(&context, vault_path)?;
+        let packet_json = serde_json::to_string(&packet)?;
+
+        self.state_store.save_context_packet(&context.run_id, &packet_json)?;
+
+        let ctx_json = serde_json::to_string(&context)?;
+        self.state_store.update_workflow_run(
+            &context.run_id,
+            "AWAITING_REASONING",
+            "AWAITING_REASONING",
+            context.crash_signature.as_deref(),
+            &ctx_json,
+        )?;
+        self.state_store
+            .save_checkpoint(&context.run_id, "AWAITING_REASONING", &ctx_json)?;
+
+        Ok((context, Some(packet)))
+    }
+
+    // Phase B: Stage 4.5 submit finding through CurationGate
+    pub fn submit_finding(
+        &self,
+        run_id: &str,
+        finding: &CandidateFinding,
+        vault_path: &Path,
+    ) -> Result<(PipelineContext, CurationReport), RcaError> {
+        let latest_checkpoint = self
+            .state_store
+            .get_latest_checkpoint(run_id)?
+            .ok_or_else(|| {
+                RcaError::Session(format!("No checkpoints found for run {}", run_id))
+            })?;
+
+        let mut context: PipelineContext =
+            serde_json::from_str(&latest_checkpoint.checkpoint_data_json)?;
+        context.vault_path = vault_path.to_string_lossy().to_string();
+
+        let packet: InvestigationContextPacket = match self.state_store.get_context_packet(run_id)? {
+            Some(pkt_json) => serde_json::from_str(&pkt_json)?,
+            None => self.assemble_context_packet(&context, vault_path)?,
+        };
+
+        let mut report = CurationGate::validate(&packet, finding, vault_path)?;
+
+        let existing_candidates = self
+            .state_store
+            .list_candidate_findings(run_id)
+            .unwrap_or_default();
+
+        let has_competing = existing_candidates
+            .iter()
+            .any(|c| c.status != "REJECTED");
+
+        if report.verdict != CurationVerdict::Rejected {
+            if finding.hold_for_curation || has_competing {
+                report.verdict = CurationVerdict::HeldForCuration;
+            }
+        }
+
+        let cand_id = finding.candidate_id.clone().unwrap_or_else(|| {
+            format!(
+                "cand-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            )
+        });
+        let finding_json = serde_json::to_string(finding)?;
+        let aff_json = serde_json::to_string(&finding.affected_symbols)?;
+        let now = current_timestamp_secs();
+        let outcome_str = match finding.outcome {
+            FindingOutcome::Resolved => "RESOLVED",
+            FindingOutcome::Inconclusive => "INCONCLUSIVE",
+        };
+        let status_str = match report.verdict {
+            CurationVerdict::Approved => "ACCEPTED",
+            CurationVerdict::HeldForCuration => "PENDING",
+            CurationVerdict::Rejected => "REJECTED",
+        };
+
+        let record = CandidateFindingRecord {
+            candidate_id: cand_id,
+            run_id: run_id.to_string(),
+            storm_candidate_id: None,
+            outcome: outcome_str.to_string(),
+            summary: finding.primary_hypothesis.clone(),
+            remediation_proposal: finding.remediation_proposal.clone(),
+            confidence_score: finding.confidence_score,
+            affected_symbols_json: aff_json,
+            finding_json,
+            status: status_str.to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.state_store.stage_candidate_finding(&record)?;
+
+        match report.verdict {
+            CurationVerdict::Rejected => {
+                // Kept in AWAITING_REASONING, no disk mutations
+                Ok((context, report))
+            }
+            CurationVerdict::HeldForCuration => {
+                let ctx_json = serde_json::to_string(&context)?;
+                self.state_store.update_workflow_run(
+                    &context.run_id,
+                    "AWAITING_CURATION",
+                    "AWAITING_CURATION",
+                    context.crash_signature.as_deref(),
+                    &ctx_json,
+                )?;
+                self.state_store
+                    .save_checkpoint(&context.run_id, "AWAITING_CURATION", &ctx_json)?;
+                Ok((context, report))
+            }
+            CurationVerdict::Approved => {
+                self.apply_crystallization(&mut context, &report, finding.outcome, vault_path)?;
+                Ok((context, report))
+            }
+        }
+    }
+
+    // Adjudicate multi-agent findings held at AWAITING_CURATION
+    pub fn curate_investigation(
+        &self,
+        run_id: &str,
+        winning_candidate_id: &str,
+        vault_path: &Path,
+    ) -> Result<(PipelineContext, CurationReport), RcaError> {
+        let candidates = self.state_store.list_candidate_findings(run_id)?;
+        let winning_record = candidates
+            .iter()
+            .find(|c| c.candidate_id == winning_candidate_id)
+            .ok_or_else(|| {
+                RcaError::Session(format!(
+                    "Winning candidate {} not found for run {}",
+                    winning_candidate_id, run_id
+                ))
+            })?;
+
+        let mut winning_finding: CandidateFinding =
+            serde_json::from_str(&winning_record.finding_json)?;
+        winning_finding.hold_for_curation = false;
+
+        // Fold other candidates' primary_hypothesis into winning finding's invalidated_hypotheses
+        for other in &candidates {
+            if other.candidate_id != winning_candidate_id {
+                if let Ok(other_f) = serde_json::from_str::<CandidateFinding>(&other.finding_json) {
+                    if !other_f.primary_hypothesis.is_empty()
+                        && !winning_finding
+                            .invalidated_hypotheses
+                            .contains(&other_f.primary_hypothesis)
+                    {
+                        winning_finding
+                            .invalidated_hypotheses
+                            .push(other_f.primary_hypothesis.clone());
+                    }
+                }
+            }
+        }
+        self.state_store
+            .adjudicate_candidate_findings(run_id, winning_candidate_id)?;
+
+        let latest_checkpoint = self
+            .state_store
+            .get_latest_checkpoint(run_id)?
+            .ok_or_else(|| {
+                RcaError::Session(format!("No checkpoints found for run {}", run_id))
+            })?;
+
+        let mut context: PipelineContext =
+            serde_json::from_str(&latest_checkpoint.checkpoint_data_json)?;
+        context.vault_path = vault_path.to_string_lossy().to_string();
+
+        let packet: InvestigationContextPacket = match self.state_store.get_context_packet(run_id)? {
+            Some(pkt_json) => serde_json::from_str(&pkt_json)?,
+            None => self.assemble_context_packet(&context, vault_path)?,
+        };
+
+        let report = CurationGate::validate(&packet, &winning_finding, vault_path)?;
+        if report.verdict == CurationVerdict::Rejected {
+            let err_msg = report
+                .issues
+                .iter()
+                .map(|i| i.message.clone())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RcaError::Curation(format!(
+                "Curated finding rejected by CurationGate: {}",
+                err_msg
+            )));
+        }
+
+        self.apply_crystallization(&mut context, &report, winning_finding.outcome, vault_path)?;
+
+        Ok((context, report))
     }
 
     fn resolve_incident_meta(&self, incident_id: &str, vault_path: &Path) -> (String, String) {
@@ -700,6 +1118,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
 
                 // Record negative knowledge into the vault resolution node
                 let res_dir = vault_path.join("resolutions");
+                let mut planned_changes = Vec::new();
                 if res_dir.exists() {
                     if let Ok(entries) = std::fs::read_dir(&res_dir) {
                         for entry in entries.flatten() {
@@ -715,7 +1134,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                                         });
                                     if resolves_target {
                                         let mut failed_attempts = doc.frontmatter.failed_attempts.clone();
-                                        failed_attempts.push(format!("CL {} abandoned: {}", cl_number, reason));
+                                        failed_attempts.push(format!("CL {} ({}) abandoned: {}", cl_number, change_id, reason));
 
                                         let mut artifact = build_resolution_node(ResolutionInput {
                                             id: doc.frontmatter.id.clone(),
@@ -732,7 +1151,20 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                                         artifact.frontmatter.valid_from = doc.frontmatter.valid_from.clone().or_else(|| Some("2026-10-19".to_string()));
                                         artifact.frontmatter.failed_attempts = failed_attempts;
                                         artifact.rendered_markdown = serialize_document(&artifact.frontmatter, &artifact.body)?;
-                                        write_vault_node(vault_path, "resolutions", &artifact)?;
+
+                                        let old_content = std::fs::read_to_string(&path)?;
+                                        let new_content = artifact.rendered_markdown;
+                                        let rel_path = path.strip_prefix(vault_path).unwrap_or(&path).to_path_buf();
+                                        let rel_path_str = rel_path.to_string_lossy().to_string();
+                                        let diff = generate_unified_diff(&rel_path_str, &old_content, &new_content);
+                                        planned_changes.push(PlannedFileChange {
+                                            path: rel_path_str,
+                                            action: ChangeAction::Modify,
+                                            diff,
+                                            before_sha256: sha256_hex(old_content.as_bytes()),
+                                            after_sha256: sha256_hex(new_content.as_bytes()),
+                                            new_content: Some(new_content),
+                                        });
                                     }
                                 }
                             }
@@ -740,14 +1172,80 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                     }
                 }
 
-                // Lint gate: validate vault graph
-                let graph = VaultGraph::from_dir(vault_path)?;
-                let report = akashic_lint::lint_vault(&graph);
-                if !report.valid {
-                    return Err(RcaError::VaultLintFailed(
-                        report.error_count,
-                        report.issues,
-                    ));
+                if !planned_changes.is_empty() {
+                    let plan = MigrationPlan {
+                        plan_version: "1.0.0".to_string(),
+                        vault_root: vault_path.to_string_lossy().to_string(),
+                        changes: planned_changes,
+                    };
+                    apply_plan_with_validator(vault_path, &plan, |preview_graph| {
+                        let report = akashic_lint::lint_vault(preview_graph);
+                        if !report.valid {
+                            return Err(akashic_vault::VaultError::Migration(format!(
+                                "Pre-apply lint gate failed with {} error(s)",
+                                report.error_count
+                            )));
+                        }
+                        Ok(())
+                    })?;
+                }
+
+                // Auto-requeue follow-up investigation in AWAITING_REASONING and relink storm signature
+                let runs = self.state_store.list_workflow_runs().unwrap_or_default();
+                let original_run = runs.into_iter().rev().find(|r| {
+                    if format!("INC-{}", r.jira_key) == *incident_id {
+                        return true;
+                    }
+                    if let Ok(ctx) = serde_json::from_str::<PipelineContext>(&r.context_json) {
+                        ctx.incident_node_id.as_deref() == Some(incident_id)
+                    } else {
+                        false
+                    }
+                });
+
+                if let Some(orig) = original_run {
+                    if let Ok(mut new_context) = serde_json::from_str::<PipelineContext>(&orig.context_json) {
+                        let new_run_id = format!("{}-retry-{}", orig.run_id, cl_number);
+                        new_context.run_id = new_run_id.clone();
+                        new_context.prior_resolution_id = Some(resolution_id.clone());
+
+                        let mut refreshed_packet = self.assemble_context_packet(&new_context, vault_path)?;
+                        let attempt_entry = format!("CL {} ({}) abandoned: {}", cl_number, change_id, reason);
+                        if !refreshed_packet.historical_failed_attempts.contains(&attempt_entry) {
+                            refreshed_packet.historical_failed_attempts.push(attempt_entry);
+                        }
+                        if !refreshed_packet.prior_resolutions.iter().any(|p| p.resolution_id == resolution_id) {
+                            refreshed_packet.prior_resolutions.push(PriorResolutionSummary {
+                                resolution_id: resolution_id.clone(),
+                                status: "abandoned".to_string(),
+                                remediation_type: None,
+                                abandoned_reason: Some(reason.clone()),
+                            });
+                        }
+
+                        let refreshed_json = serde_json::to_string(&refreshed_packet)?;
+                        let new_ctx_json = serde_json::to_string(&new_context)?;
+                        let now = current_timestamp_secs();
+
+                        let new_run_record = WorkflowRunRecord {
+                            run_id: new_run_id.clone(),
+                            jira_key: new_context.jira_key.clone(),
+                            current_stage: "AWAITING_REASONING".to_string(),
+                            status: "AWAITING_REASONING".to_string(),
+                            crash_signature: new_context.crash_signature.clone(),
+                            context_json: new_ctx_json.clone(),
+                            context_packet_json: Some(refreshed_json.clone()),
+                            created_at: now,
+                            updated_at: now,
+                        };
+                        self.state_store.create_workflow_run(&new_run_record)?;
+                        self.state_store.save_context_packet(&new_run_id, &refreshed_json)?;
+                        self.state_store.save_checkpoint(&new_run_id, "AWAITING_REASONING", &new_ctx_json)?;
+
+                        if let Some(ref sig) = new_context.crash_signature {
+                            let _ = self.state_store.update_storm_active_run(sig, &new_run_id);
+                        }
+                    }
                 }
             }
         }
@@ -798,11 +1296,8 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         // Stage 4: Hypothesis Generation & Falsification
         self.run_stage4(&mut context).await?;
 
-        // Stage 5: Crystallize & Lint Gate
+        // Stage 5: Crystallize & Lint Gate (includes Stage 6 finalization via apply_crystallization)
         self.run_stage5(&mut context)?;
-
-        // Stage 6: Resolution & Finalize
-        self.run_stage6(&mut context)?;
 
         Ok(context)
     }
@@ -832,20 +1327,18 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         }
 
         match latest_checkpoint.stage_name.as_str() {
-            "RESOLVED" | "DEDUPLICATED" => Ok(context),
+            "RESOLVED" | "DEDUPLICATED" | "INCONCLUSIVE" | "AWAITING_REASONING" | "AWAITING_CURATION" => Ok(context),
             "CRYSTALLIZED" => {
                 self.run_stage6(&mut context)?;
                 Ok(context)
             }
             "HYPOTHESIS_FALSIFIED" => {
                 self.run_stage5(&mut context)?;
-                self.run_stage6(&mut context)?;
                 Ok(context)
             }
             "SYMBOLICATED" => {
                 self.run_stage4(&mut context).await?;
                 self.run_stage5(&mut context)?;
-                self.run_stage6(&mut context)?;
                 Ok(context)
             }
             "SANITIZED" => {
@@ -855,7 +1348,6 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                 }
                 self.run_stage4(&mut context).await?;
                 self.run_stage5(&mut context)?;
-                self.run_stage6(&mut context)?;
                 Ok(context)
             }
             "CREATED" => {
@@ -866,7 +1358,6 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                 }
                 self.run_stage4(&mut context).await?;
                 self.run_stage5(&mut context)?;
-                self.run_stage6(&mut context)?;
                 Ok(context)
             }
             other => Err(RcaError::StageFailed(format!(

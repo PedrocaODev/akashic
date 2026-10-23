@@ -1,18 +1,26 @@
+pub mod curation;
 pub mod pipeline;
 pub mod stage4;
 pub mod store;
 pub mod symbol_cache;
 pub mod symbolicator;
 
-pub use pipeline::{ConductorPipeline, GerritEvent, Pipeline, PipelineContext, PipelineInput};
+pub use curation::{
+    BlastRadiusContext, CurationGate, CurationIssue, CurationReport, CurationVerdict,
+    InvestigationContextPacket, PriorResolutionSummary,
+};
+pub use pipeline::{
+    ConductorPipeline, GerritEvent, Pipeline, PipelineContext, PipelineInput, WorkflowStage,
+    WorkflowStatus,
+};
 pub use stage4::{
-    CliSubprocessRunner, GeminiCliStage4Runner, HeadlessGeminiExecutor, HypothesisCandidate,
-    MockStage4Executor, MockStage4Runner, Stage4Executor, Stage4Input, Stage4Output,
-    Stage4Request, Stage4Runner,
+    CandidateFinding, FindingOutcome, HypothesisCandidate, MockStage4Executor, MockStage4Runner,
+    Stage4Executor, Stage4Input, Stage4Output, Stage4Request, Stage4Runner,
 };
 pub use store::{
-    CheckpointRecord, DaemonWatermarkRecord, IncidentClRecord, RcaStateStore, SessionRecord,
-    StateStore, StormGateOutcome, StormSignatureRecord, WorkflowRunRecord,
+    CandidateFindingRecord, CheckpointRecord, DaemonWatermarkRecord, IncidentClRecord,
+    RcaStateStore, SessionRecord, StateStore, StormGateOutcome, StormSignatureRecord,
+    WorkflowRunRecord,
 };
 pub use symbol_cache::SymbolCache;
 pub use symbolicator::{
@@ -54,6 +62,8 @@ pub enum RcaError {
     Daemon(String),
     #[error("Execution error: {0}")]
     Execution(String),
+    #[error("Curation error: {0}")]
+    Curation(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

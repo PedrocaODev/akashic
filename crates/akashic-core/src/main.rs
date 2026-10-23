@@ -202,6 +202,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Rca { command } => {
             let rca_db_path = PathBuf::from(&ctx.config.rca.db_path);
+            let vault_path = ctx.resolve_vault_path(None);
             match command {
                 RcaCommands::Run(args) => {
                     let state_store = rca::store::StateStore::open(&rca_db_path)?;
@@ -219,13 +220,71 @@ async fn main() -> anyhow::Result<()> {
                         device: "cli-device".into(),
                         android_version: "14".into(),
                         raw_logs: raw_log,
-                        vault_path: ctx.resolve_vault_path(None),
+                        vault_path: vault_path.clone(),
                         graph_store: Some(PathBuf::from(&ctx.config.engine.db_path)),
                         prior_resolution_id: None,
                         policy_path: None,
                     };
-                    let rca_ctx = pipeline.run(input).await?;
-                    println!("RCA completed: run_id={}, deduplicated={}", rca_ctx.run_id, rca_ctx.deduplicated);
+
+                    if args.two_phase || args.prepare_only || args.finding_file.is_some() {
+                        let (rca_ctx, packet) = pipeline.prepare_investigation(input)?;
+                        println!("Prepared investigation: run_id={}, deduplicated={}", rca_ctx.run_id, rca_ctx.deduplicated);
+                        if let Some(pkt) = packet {
+                            println!("{}", serde_json::to_string_pretty(&pkt)?);
+                        }
+                        if let Some(ref finding_path) = args.finding_file {
+                            let content = std::fs::read_to_string(finding_path)?;
+                            let finding: rca::CandidateFinding = serde_json::from_str(&content)?;
+                            let (_ctx, report) = pipeline.submit_finding(&rca_ctx.run_id, &finding, &vault_path)?;
+                            println!("Curation report: verdict={:?}", report.verdict);
+                        }
+                    } else {
+                        let rca_ctx = pipeline.run(input).await?;
+                        println!("RCA completed: run_id={}, deduplicated={}", rca_ctx.run_id, rca_ctx.deduplicated);
+                    }
+                }
+                RcaCommands::Prepare(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+                    let raw_log = if let Some(file) = args.log_file {
+                        std::fs::read_to_string(&file)?
+                    } else {
+                        args.raw_log.unwrap_or_default()
+                    };
+                    let input = rca::pipeline::PipelineInput {
+                        run_id: None,
+                        legacy_session_id: None,
+                        jira_key: args.jira_key.unwrap_or_else(|| "CLI-RCA".into()),
+                        app_id: args.app_id.unwrap_or_default(),
+                        device: "cli-device".into(),
+                        android_version: "14".into(),
+                        raw_logs: raw_log,
+                        vault_path: vault_path.clone(),
+                        graph_store: Some(PathBuf::from(&ctx.config.engine.db_path)),
+                        prior_resolution_id: None,
+                        policy_path: None,
+                    };
+
+                    let (_rca_ctx, packet) = pipeline.prepare_investigation(input)?;
+                    if let Some(pkt) = packet {
+                        println!("{}", serde_json::to_string_pretty(&pkt)?);
+                    }
+                }
+                RcaCommands::Context(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    if let Some(pkt) = state_store.get_context_packet(&args.run_id)? {
+                        println!("{}", serde_json::to_string_pretty(&pkt)?);
+                    } else {
+                        anyhow::bail!("Investigation context packet for '{}' not found", args.run_id);
+                    }
+                }
+                RcaCommands::SubmitFinding(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+                    let content = std::fs::read_to_string(&args.finding_file)?;
+                    let finding: rca::CandidateFinding = serde_json::from_str(&content)?;
+                    let (_ctx, report) = pipeline.submit_finding(&args.run_id, &finding, &vault_path)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 }
                 RcaCommands::Start(args) => {
                     println!("Starting RCA investigation for trigger: {}", args.trigger_id);
@@ -258,7 +317,45 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", serde_json::to_string_pretty(&res)?);
                 }
                 RcaCommands::Crystallize(args) => {
-                    println!("Crystallizing run: {}", args.run_id);
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+
+                    if let Some(ref file) = args.finding_file {
+                        let content = std::fs::read_to_string(file)?;
+                        let finding: rca::CandidateFinding = serde_json::from_str(&content)?;
+                        let (_ctx, report) = pipeline.submit_finding(&args.run_id, &finding, &vault_path)?;
+                        println!("Submitted finding: verdict={:?}", report.verdict);
+                    } else {
+                        let outcome = match args.outcome.as_deref().unwrap_or("resolved") {
+                            "inconclusive" => rca::FindingOutcome::Inconclusive,
+                            _ => rca::FindingOutcome::Resolved,
+                        };
+                        let finding = rca::CandidateFinding {
+                            candidate_id: None,
+                            agent_id: None,
+                            run_id: Some(args.run_id.clone()),
+                            storm_candidate_id: None,
+                            outcome,
+                            primary_hypothesis: args.summary.clone().unwrap_or_else(|| "CLI Finding".to_string()),
+                            falsification_attempts: vec!["CLI empirical analysis".to_string()],
+                            invalidated_hypotheses: vec![],
+                            failed_attempts: vec![],
+                            confidence_score: args.confidence.unwrap_or(1.0),
+                            remediation_proposal: args.remediation.unwrap_or_else(|| args.summary.unwrap_or_default()),
+                            remediation_type: Some("permanent_fix".to_string()),
+                            supersedes_resolution_id: None,
+                            hold_for_curation: args.hold_for_curation,
+                            affected_symbols: vec![],
+                        };
+                        let (_ctx, report) = pipeline.submit_finding(&args.run_id, &finding, &vault_path)?;
+                        println!("Crystallized run: verdict={:?}", report.verdict);
+                    }
+                }
+                RcaCommands::Curate(args) => {
+                    let state_store = rca::store::StateStore::open(&rca_db_path)?;
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+                    let (_ctx, report) = pipeline.curate_investigation(&args.run_id, &args.candidate_id, &vault_path)?;
+                    println!("Adjudicated run: verdict={:?}, resolution={:?}", report.verdict, report.resolution_node_id);
                 }
                 RcaCommands::Supersede(args) => {
                     println!("Superseding {} with {}", args.old_id, args.new_id);
@@ -289,6 +386,24 @@ async fn main() -> anyhow::Result<()> {
                 let store = engine::store::GraphStore::open(&db_path)?;
                 let report = daemon::discover_workspace(&path, &store)?;
                 println!("Discovered {} repositories, {} package mappings", report.discovered_repositories.len(), report.package_mappings.len());
+            }
+            DaemonCommands::ServeA2a(args) => {
+                let bind_addr = args.bind.unwrap_or_else(|| "127.0.0.1:9091".to_string());
+                let db_path = args.db.map(PathBuf::from).unwrap_or_else(|| PathBuf::from(&ctx.config.rca.db_path));
+                let vault_path = args.vault.map(PathBuf::from).unwrap_or_else(|| ctx.resolve_vault_path(None));
+                let graph_store = args.graph_store.map(PathBuf::from).or_else(|| Some(PathBuf::from(&ctx.config.engine.db_path)));
+
+                let config = daemon::A2aServerConfig {
+                    bind_addr: bind_addr.clone(),
+                    db_path,
+                    vault_path,
+                    graph_store,
+                    policy_path: None,
+                };
+                let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+                println!("A2A v1.0 server listening on http://{}", bind_addr);
+                let server = std::sync::Arc::new(daemon::A2aServer::new(config)?);
+                server.serve(listener).await?;
             }
         },
         Commands::Embedding { command } => match command {

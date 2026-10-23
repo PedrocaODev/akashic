@@ -37,7 +37,7 @@ pub struct ResolvedRepoTarget {
     pub class_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SymbolicationResult {
     pub crash_signature: String,
     pub is_native_crash: bool,

@@ -1,3 +1,4 @@
+pub mod a2a;
 pub mod debounce;
 pub mod events;
 pub mod pipeline;
@@ -5,6 +6,7 @@ pub mod stream;
 pub mod supervisor;
 pub mod watermark;
 
+pub use a2a::*;
 pub use debounce::{CoalescedProjectBatch, DebounceQueue, PendingProjectBatch};
 pub use events::{
     is_self_triggered_event, parse_stream_event, should_process_event, GerritEventType,
@@ -43,6 +45,10 @@ pub enum DaemonError {
     Vault(String),
 }
 
+fn default_a2a_bind_addr() -> String {
+    "127.0.0.1:9091".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
     pub db_path: String,
@@ -52,6 +58,8 @@ pub struct DaemonConfig {
     pub debounce_max_cap_secs: u64,
     pub loop_drop_prefix: String,
     pub auto_discovery_enabled: bool,
+    #[serde(default = "default_a2a_bind_addr")]
+    pub a2a_bind_addr: String,
 }
 
 impl Default for DaemonConfig {
@@ -64,6 +72,7 @@ impl Default for DaemonConfig {
             debounce_max_cap_secs: 300,
             loop_drop_prefix: "akashic/".to_string(),
             auto_discovery_enabled: true,
+            a2a_bind_addr: default_a2a_bind_addr(),
         }
     }
 }

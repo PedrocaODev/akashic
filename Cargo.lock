@@ -63,6 +63,7 @@ dependencies = [
  "chrono",
  "fastrand",
  "futures-util",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

@@ -818,3 +818,294 @@ allowed_values = ["planned", "active", "completed"]
     Ok(())
 }
 
+#[tokio::test]
+async fn test_two_phase_rca_mcp_and_curation_gate_seam() -> anyhow::Result<()> {
+    use rmcp::handler::server::wrapper::Parameters;
+
+    // 1. Setup temporary workspace and repository
+    let temp = tempfile::tempdir()?;
+    let temp_dir = temp.path();
+
+    let repo_dir = temp_dir.join("auth-repo");
+    fs::create_dir_all(repo_dir.join(".git"))?;
+    fs::write(
+        repo_dir.join(".git/config"),
+        "[remote \"origin\"]\nurl = ssh://gerrit/auth-repo.git\n",
+    )?;
+    fs::write(
+        repo_dir.join("settings.gradle"),
+        "rootProject.name = 'auth-repo'\n",
+    )?;
+    fs::write(
+        repo_dir.join("gradle.properties"),
+        "APP_ID=com.example.auth\n",
+    )?;
+    fs::write(
+        repo_dir.join("build.gradle"),
+        "applicationId \"com.example.auth\"\nnamespace \"com.example.auth\"\n",
+    )?;
+
+    let src_dir = repo_dir.join("src");
+    fs::create_dir_all(&src_dir)?;
+    fs::write(
+        src_dir.join("service.kt"),
+        r#"
+package com.example.auth
+
+class AuthService {
+    fun authenticate_user(credentials: String): Boolean {
+        return credentials.isNotEmpty()
+    }
+}
+"#,
+    )?;
+
+    // Vault and .akashic persistence paths
+    let vault_dir = temp_dir.join("vault");
+    fs::create_dir_all(vault_dir.join("incidents"))?;
+    fs::create_dir_all(vault_dir.join("evidence"))?;
+    fs::create_dir_all(vault_dir.join("resolutions"))?;
+
+    let dot_akashic = temp_dir.join(".akashic");
+    fs::create_dir_all(&dot_akashic)?;
+    let code_graph_db = dot_akashic.join("code_graph.db");
+
+    // Index code graph
+    let engine_config = EngineConfig {
+        db_path: code_graph_db.to_string_lossy().to_string(),
+        ..EngineConfig::default()
+    };
+    let code_sanitizer = CodeProfile::new();
+    let embedding_provider = DeterministicHashEmbeddingProvider::new(64);
+    let engine = CodeGraphEngine::new(engine_config, code_sanitizer, embedding_provider);
+    let store = engine.open_store()?;
+    let _ = engine.discover_and_index(&store, &repo_dir)?;
+    let _ = engine.index_repository(&store, &repo_dir, "auth-repo", "HEAD")?;
+
+    store.upsert_community(&CommunityRecord {
+        community_id: "auth-core".to_string(),
+        repo_name: "auth-repo".to_string(),
+        label: "Authentication Core".to_string(),
+        cohesion_score: 0.95,
+        node_count: 2,
+    })?;
+
+    // Seed prior negative knowledge into Vault
+    fs::write(
+        vault_dir.join("resolutions/RES-AUTH-200-01.md"),
+        r#"---
+id: RES-AUTH-200-01
+title: "Prior Resolution Attempt"
+type: resolution
+status: abandoned
+scope:
+  app: com.example.auth
+invalidated_hypotheses:
+  - "Stale database token cache timeout"
+failed_attempts:
+  - "Restarting the auth service daemon"
+relations:
+  - type: resolves
+    target: INC-AUTH-201
+---
+# Prior Resolution Attempt
+"#,
+    )?;
+
+    let mcp_server = AkashicMcpServer::new(vault_dir.clone(), temp_dir.to_path_buf());
+
+    let crash_log = r#"
+2026-10-19 12:00:00 [DEBUG] Sensitive phone: +1-555-123-4567 email: dev@example.com
+2026-10-19 12:00:01 [ERROR] java.lang.NullPointerException: Null pointer in auth routine
+    at com.example.auth.AuthService.authenticate_user(service.kt:42)
+    at com.example.auth.MainActivity.onCreate(MainActivity.kt:15)
+Auth header: Bearer abcdef1234567890abcdef
+"#;
+
+    // 2. Trigger Phase A: rca_trigger with two_phase: Some(true)
+    let trigger_params = akashic_core::mcp::RcaTriggerParams {
+        app_id: "com.example.auth".to_string(),
+        raw_log: crash_log.to_string(),
+        two_phase: Some(true),
+        jira_key: Some("AUTH-201".to_string()),
+        run_id: Some("run-auth-201".to_string()),
+        prior_resolution_id: Some("RES-AUTH-200-01".to_string()),
+    };
+    let trigger_res = mcp_server.rca_trigger(Parameters(trigger_params)).await;
+    assert_eq!(trigger_res.is_error, Some(false));
+    let trigger_val_raw: serde_json::Value = serde_json::to_value(&trigger_res)?;
+    let trigger_text = trigger_val_raw["content"][0]["text"].as_str().unwrap();
+    let trigger_val: serde_json::Value = serde_json::from_str(trigger_text)?;
+    assert_eq!(trigger_val["status"], "AWAITING_REASONING");
+    assert_eq!(trigger_val["incident_id"], "INC-AUTH-201");
+
+    let packet = &trigger_val["context_packet"];
+    assert!(packet.is_object(), "InvestigationContextPacket must be present");
+    assert_eq!(packet["incident_id"], "INC-AUTH-201");
+    let hist_hyp = packet["historical_invalidated_hypotheses"].as_array().unwrap();
+    assert!(
+        hist_hyp.iter().any(|h| h.as_str() == Some("Stale database token cache timeout")),
+        "Historical negative knowledge must be gathered into packet: {:?}",
+        hist_hyp
+    );
+    let hist_failed = packet["historical_failed_attempts"].as_array().unwrap();
+    assert!(
+        hist_failed.iter().any(|f| f.as_str() == Some("Restarting the auth service daemon")),
+        "Historical failed attempts must be in packet: {:?}",
+        hist_failed
+    );
+
+    // 3. Verify rca_status shows AWAITING_REASONING
+    let status_res = mcp_server.rca_status(Parameters(akashic_core::mcp::RcaStatusParams {
+        investigation_id: "run-auth-201".to_string(),
+    })).await;
+    assert_eq!(status_res.is_error, Some(false));
+    let status_str = serde_json::to_string(&status_res)?;
+    assert!(status_str.contains("AWAITING_REASONING"));
+
+    // 4. Test Curation Gate Invariant C001 (Negative-Knowledge Non-Regression)
+    let c001_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-201".to_string(),
+        primary_hypothesis: Some("Stale database token cache timeout".to_string()),
+        falsification_attempts: Some(vec!["Tested token cache refresh".to_string()]),
+        remediation_proposal: Some("Flush token cache on startup".to_string()),
+        outcome: Some("resolved".to_string()),
+        ..Default::default()
+    };
+    let c001_res = mcp_server.rca_crystallize(Parameters(c001_params)).await;
+    assert_eq!(c001_res.is_error, Some(true), "C001 violation must be rejected");
+    let c001_str = serde_json::to_string(&c001_res)?;
+    assert!(c001_str.contains("C001"), "Error must cite invariant C001: {}", c001_str);
+    assert!(
+        !vault_dir.join("resolutions/RES-AUTH-201-01.md").exists(),
+        "Vault disk must remain untouched on C001 rejection"
+    );
+
+    // 5. Test Curation Gate Invariant C002 (Falsification Trace Completeness)
+    let c002_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-201".to_string(),
+        primary_hypothesis: Some("Unchecked null credentials argument".to_string()),
+        falsification_attempts: Some(vec![]), // Empty!
+        remediation_proposal: Some("Add null check in authenticate_user".to_string()),
+        outcome: Some("resolved".to_string()),
+        ..Default::default()
+    };
+    let c002_res = mcp_server.rca_crystallize(Parameters(c002_params)).await;
+    assert_eq!(c002_res.is_error, Some(true), "C002 violation must be rejected");
+    let c002_str = serde_json::to_string(&c002_res)?;
+    assert!(c002_str.contains("C002"), "Error must cite invariant C002: {}", c002_str);
+
+    // 6. Test Partial Crystallization on Inconclusive Finding
+    let inconv_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-201".to_string(),
+        primary_hypothesis: Some("Hypothetical thread contention in service".to_string()),
+        invalidated_hypotheses: Some(vec!["Thread contention during auth".to_string()]),
+        falsification_attempts: Some(vec!["Load test with 100 threads showed no contention".to_string()]),
+        outcome: Some("inconclusive".to_string()),
+        ..Default::default()
+    };
+    let inconv_res = mcp_server.rca_crystallize(Parameters(inconv_params)).await;
+    assert_eq!(inconv_res.is_error, Some(false), "Inconclusive finding should be approved for partial crystallization");
+    let inconv_raw: serde_json::Value = serde_json::to_value(&inconv_res)?;
+    let inconv_text = inconv_raw["content"][0]["text"].as_str().unwrap();
+    let inconv_val: serde_json::Value = serde_json::from_str(inconv_text)?;
+    assert_eq!(inconv_val["verdict"], "APPROVED");
+    assert!(vault_dir.join("incidents/INC-AUTH-201.md").exists(), "INC note must be created");
+    assert!(vault_dir.join("evidence/EVD-AUTH-201-STACK.md").exists(), "EVD note must be created");
+    assert!(
+        !vault_dir.join("resolutions/RES-AUTH-201-01.md").exists(),
+        "Partial crystallization must abstain from creating RES note"
+    );
+
+    // 7. Test Multi-Agent Competing Findings and Adjudication
+    // Trigger run 2
+    let trigger2_params = akashic_core::mcp::RcaTriggerParams {
+        app_id: "com.example.auth".to_string(),
+        raw_log: crash_log.to_string(),
+        two_phase: Some(true),
+        jira_key: Some("AUTH-202".to_string()),
+        run_id: Some("run-auth-202".to_string()),
+        prior_resolution_id: None,
+    };
+    let _ = mcp_server.rca_trigger(Parameters(trigger2_params)).await;
+
+    // Agent Alpha submits with hold_for_curation = true
+    let alpha_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-202".to_string(),
+        candidate_id: Some("cand-alpha".to_string()),
+        agent_id: Some("agent-alpha".to_string()),
+        primary_hypothesis: Some("Null credentials passed to AuthService.authenticate_user".to_string()),
+        falsification_attempts: Some(vec!["Verified null credentials throws NullPointerException".to_string()]),
+        remediation_proposal: Some("Add null check to AuthService.kt authenticate_user".to_string()),
+        outcome: Some("resolved".to_string()),
+        hold_for_curation: Some(true),
+        ..Default::default()
+    };
+    let alpha_res = mcp_server.rca_crystallize(Parameters(alpha_params)).await;
+    assert_eq!(alpha_res.is_error, Some(false));
+    let alpha_raw: serde_json::Value = serde_json::to_value(&alpha_res)?;
+    let alpha_text = alpha_raw["content"][0]["text"].as_str().unwrap();
+    let alpha_val: serde_json::Value = serde_json::from_str(alpha_text)?;
+    assert_eq!(alpha_val["verdict"], "HELD_FOR_CURATION");
+
+    // Agent Beta submits competing finding
+    let beta_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-202".to_string(),
+        candidate_id: Some("cand-beta".to_string()),
+        agent_id: Some("agent-beta".to_string()),
+        primary_hypothesis: Some("Missing READ_PHONE_STATE permission in MainActivity".to_string()),
+        falsification_attempts: Some(vec!["Tested with granted permission, crash still reproduced".to_string()]),
+        remediation_proposal: Some("Request READ_PHONE_STATE permission at runtime".to_string()),
+        outcome: Some("resolved".to_string()),
+        hold_for_curation: Some(true),
+        ..Default::default()
+    };
+    let beta_res = mcp_server.rca_crystallize(Parameters(beta_params)).await;
+    assert_eq!(beta_res.is_error, Some(false));
+    let beta_raw: serde_json::Value = serde_json::to_value(&beta_res)?;
+    let beta_text = beta_raw["content"][0]["text"].as_str().unwrap();
+    let beta_val: serde_json::Value = serde_json::from_str(beta_text)?;
+    assert_eq!(beta_val["verdict"], "HELD_FOR_CURATION");
+
+    // Adjudicate run 2 selecting cand-alpha as winner
+    let adjudicate_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "run-auth-202".to_string(),
+        winning_candidate_id: Some("cand-alpha".to_string()),
+        ..Default::default()
+    };
+    let adj_res = mcp_server.rca_crystallize(Parameters(adjudicate_params)).await;
+    assert_eq!(adj_res.is_error, Some(false), "Adjudication must succeed");
+    let adj_raw: serde_json::Value = serde_json::to_value(&adj_res)?;
+    let adj_text = adj_raw["content"][0]["text"].as_str().unwrap();
+    let adj_val: serde_json::Value = serde_json::from_str(adj_text)?;
+    assert_eq!(adj_val["verdict"], "APPROVED");
+
+    // Verify crystallized RES note contains beta's hypothesis in invalidated_hypotheses
+    let res_path = vault_dir.join("resolutions/RES-AUTH-202-01.md");
+    assert!(res_path.exists(), "RES note must be crystallized on disk");
+    let res_content = fs::read_to_string(&res_path)?;
+    assert!(
+        res_content.contains("Missing READ_PHONE_STATE permission in MainActivity"),
+        "Rejected candidate hypothesis must be folded into invalidated_hypotheses negative knowledge: {}",
+        res_content
+    );
+
+    // Lint vault to confirm zero errors
+    let vault_graph = VaultGraph::from_dir(&vault_dir)?;
+    let lint_report = lint_vault(&vault_graph);
+    assert_eq!(lint_report.error_count, 0, "Vault must have zero lint errors after crystallization");
+
+    // 8. Verify CLI argument parsing for curate, prepare-only, and daemon serve-a2a
+    let cli_curate = Cli::try_parse_from(["akashic", "rca", "curate", "--run-id", "run-auth-202", "--candidate-id", "cand-alpha"])?;
+    assert!(matches!(cli_curate.command, akashic_core::Commands::Rca { .. }));
+
+    let cli_prep = Cli::try_parse_from(["akashic", "rca", "run", "--jira-key", "AUTH-202", "--app-id", "com.example.auth", "--log-file", "logs.txt", "--prepare-only"])?;
+    assert!(matches!(cli_prep.command, akashic_core::Commands::Rca { .. }));
+
+    let cli_a2a = Cli::try_parse_from(["akashic", "daemon", "serve-a2a", "--bind", "127.0.0.1:9091"])?;
+    assert!(matches!(cli_a2a.command, akashic_core::Commands::Daemon { .. }));
+
+    Ok(())
+}
+
+

@@ -130,6 +130,18 @@ _Avoid_: Debugging session, troubleshooting, analysis run
 The external issue identifier (such as a MotoJira issue key or Bug2Go identifier) that initiates an Investigation.
 _Avoid_: Incident ticket, bug report, incoming alert
 
+**Investigation Context Packet**:
+A deterministic bundle assembled prior to hypothesis generation containing sanitized logs, symbolicated stack frames, Code Graph Blast Radius, and prior Negative Knowledge for an Incident.
+_Avoid_: Prompt context, harness bundle, crash dump, debug payload
+
+**Candidate Finding**:
+A structured root cause analysis submission containing a primary Hypothesis, falsification trace, and proposed remediation produced by an external reasoning agent and awaiting evaluation by the Curation Gate.
+_Avoid_: Raw output, agent response, draft note
+
+**Curation Gate**:
+The pre-crystallization verification mechanism that validates a Candidate Finding against prior Negative Knowledge, falsification trace requirements, in-memory Vault lint rules, and Scope conflict checks before applying a Plan to the Vault.
+_Avoid_: Post-write linter, blind ingestion, auto-saver
+
 **Resolution Node**:
 An authoritative Vault Node documenting a verified code fix, workaround, architectural redesign, or revert addressing one or more Incidents via a forward `resolves` Relation.
 _Avoid_: Patch ticket, fix note, solution document, PR summary

@@ -205,6 +205,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
             updated_at: now,
             context_json: ctx_json.clone(),
             context_packet_json: None,
+            curation_report_json: None,
         };
 
         if self.state_store.get_workflow_run(&context.run_id)?.is_none() {
@@ -819,6 +820,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         let record = CandidateFindingRecord {
             candidate_id: cand_id,
             run_id: run_id.to_string(),
+            agent_id: finding.agent_id.clone(),
             storm_candidate_id: None,
             outcome: outcome_str.to_string(),
             summary: finding.primary_hypothesis.clone(),
@@ -1235,6 +1237,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                             crash_signature: new_context.crash_signature.clone(),
                             context_json: new_ctx_json.clone(),
                             context_packet_json: Some(refreshed_json.clone()),
+                            curation_report_json: None,
                             created_at: now,
                             updated_at: now,
                         };

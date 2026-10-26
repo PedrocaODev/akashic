@@ -30,14 +30,18 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - Local-Host Conductor 6-Stage Pipeline and SQLite Durable State Machine: Host-native RCA pipeline and durable state checkpointing.
 - [ADRs 0001–0010: Clean Consolidated Baseline](../adr/0001-Adopt-Eight-Crate-Layered-Workspace-Topology.md): Established canonical architectural decision records covering the 8-crate workspace, isolated SQLite databases, OKF v0.2 forward-only relations, conflict abstention, deterministic AST indexing, non-destructive Git ingestion, profile-driven sanitization, Local-Host RCA Conductor, Gerrit stream adaptive debounce, and clean-slate domain-subcommand CLI.
 - [Spec 0001: Unified Akashic Architecture](../specs/0001-unified-akashic-architecture.md): Authoritative architecture specification (`spec-0001-unified-akashic-architecture`).
+- [ADR 0011: Two-Phase RCA Server, Investigation Context Packet, and Curation Gate](../adr/0011-Two-Phase-RCA-Server-Investigation-Context-Packet-And-Curation-Gate.md): Eliminates subprocess LLM invocation in favor of a two-phase deterministic RCA server, Investigation Context Packet, and 4-layer Curation Gate.
+- [Spec 0002: Two-Phase Deterministic RCA Server, Investigation Context Packet, and Curation Gate](../specs/0002-two-phase-rca-server-and-curation-gate.md): Authoritative specification for Phase A context assembly, Phase B curation gate, partial crystallization, multi-agent adjudication, and A2A v1.0 server.
 
 ## Frontier (Unblocked)
 
-*(None)*
+- [20 — Curation Gate Contract, Forward-Only Supersession, and Single-Pass Lint-Gated Crystallization](tickets/20-curation-gate-forward-supersession-and-lint-gated-crystallization.md) (`ready-for-agent`)
 
 ## Blocked
 
-*(None)*
+- [21 — Bounded Frontmatter Context Assembly and Indexed Gerrit Abandonment Lookup](tickets/21-bounded-frontmatter-context-assembly-and-indexed-abandonment-lookup.md) (`ready-for-agent`, blocked by 20)
+- [22 — Composite Candidate Finding Schema, Checkpointed `rca_status`, and Persisted Curation Reports](tickets/22-composite-candidate-finding-schema-and-persisted-curation-reports.md) (`ready-for-agent`, blocked by 20)
+- [23 — Typed A2A JSON-RPC Request Deserialization, Persisted Report Artifacts, and Paginated Task Listing](tickets/23-typed-a2a-jsonrpc-deserialization-and-paginated-task-listing.md) (`ready-for-agent`, blocked by 22)
 
 ## Completed
 
@@ -61,4 +65,4 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - [18 — Betweenness Centrality God Nodes, File-Bucketed Graph Communities, and Bounded Top-K Analytics](tickets/18-betweenness-centrality-god-nodes-and-bounded-graph-analytics.md) (`done`)
 - [19 — $O(\log N)$ Symbol Store LRU Cache Eviction and Min-Heap Adaptive Debouncer](tickets/19-logarithmic-symbol-cache-lru-and-min-heap-debouncer.md) (`done`)
 
-*(Note: Stage 1, 2, & 3 tickets 01–19 are complete.)*
+*(Note: Stage 1, 2, & 3 tickets 01–19 are complete. Stage 4 Spec 0002 remediation tickets 20–23 are queued.)*

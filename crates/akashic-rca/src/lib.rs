@@ -6,8 +6,8 @@ pub mod symbol_cache;
 pub mod symbolicator;
 
 pub use curation::{
-    BlastRadiusContext, CurationGate, CurationIssue, CurationReport, CurationVerdict,
-    InvestigationContextPacket, PriorResolutionSummary,
+    BlastRadiusContext, CurationGate, CurationIssue, CurationReport, CurationSeverity,
+    CurationVerdict, InvestigationContextPacket, PriorResolutionSummary,
 };
 pub use pipeline::{
     ConductorPipeline, GerritEvent, Pipeline, PipelineContext, PipelineInput, WorkflowStage,

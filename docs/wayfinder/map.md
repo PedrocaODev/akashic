@@ -2,7 +2,7 @@
 id: wayfinder-map
 title: "OEM Android Knowledge & RCA Infrastructure"
 label: "wayfinder:map"
-status: active
+status: completed
 ---
 
 # Wayfinder Map: OEM Android Knowledge & RCA Infrastructure
@@ -35,13 +35,11 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 
 ## Frontier (Unblocked)
 
-- [20 — Curation Gate Contract, Forward-Only Supersession, and Single-Pass Lint-Gated Crystallization](tickets/20-curation-gate-forward-supersession-and-lint-gated-crystallization.md) (`ready-for-agent`)
+*(None)*
 
 ## Blocked
 
-- [21 — Bounded Frontmatter Context Assembly and Indexed Gerrit Abandonment Lookup](tickets/21-bounded-frontmatter-context-assembly-and-indexed-abandonment-lookup.md) (`ready-for-agent`, blocked by 20)
-- [22 — Composite Candidate Finding Schema, Checkpointed `rca_status`, and Persisted Curation Reports](tickets/22-composite-candidate-finding-schema-and-persisted-curation-reports.md) (`ready-for-agent`, blocked by 20)
-- [23 — Typed A2A JSON-RPC Request Deserialization, Persisted Report Artifacts, and Paginated Task Listing](tickets/23-typed-a2a-jsonrpc-deserialization-and-paginated-task-listing.md) (`ready-for-agent`, blocked by 22)
+*(None)*
 
 ## Completed
 
@@ -64,5 +62,9 @@ Deliver an end-to-end, local-host deployable unified **Akashic** platform in `/h
 - [17 — `sqlite-vec` Virtual Table Persistence and Threshold-Faithful Inferred Code Edges](tickets/17-sqlite-vec-virtual-tables-and-inferred-code-edges.md) (`done`)
 - [18 — Betweenness Centrality God Nodes, File-Bucketed Graph Communities, and Bounded Top-K Analytics](tickets/18-betweenness-centrality-god-nodes-and-bounded-graph-analytics.md) (`done`)
 - [19 — $O(\log N)$ Symbol Store LRU Cache Eviction and Min-Heap Adaptive Debouncer](tickets/19-logarithmic-symbol-cache-lru-and-min-heap-debouncer.md) (`done`)
+- [20 — Curation Gate Contract, Forward-Only Supersession, and Single-Pass Lint-Gated Crystallization](tickets/20-curation-gate-forward-supersession-and-lint-gated-crystallization.md) (`done`)
+- [21 — Bounded Frontmatter Context Assembly and Indexed Gerrit Abandonment Lookup](tickets/21-bounded-frontmatter-context-assembly-and-indexed-abandonment-lookup.md) (`done`)
+- [22 — Composite Candidate Finding Schema, Checkpointed `rca_status`, and Persisted Curation Reports](tickets/22-composite-candidate-finding-schema-and-persisted-curation-reports.md) (`done`)
+- [23 — Typed A2A JSON-RPC Request Deserialization, Persisted Report Artifacts, and Paginated Task Listing](tickets/23-typed-a2a-jsonrpc-deserialization-and-paginated-task-listing.md) (`done`)
 
-*(Note: Stage 1, 2, & 3 tickets 01–19 are complete. Stage 4 Spec 0002 remediation tickets 20–23 are queued.)*
+*(Note: Stage 1, 2, 3, & 4 tickets 01–23 are complete.)*

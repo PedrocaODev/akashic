@@ -462,10 +462,23 @@ async fn test_stage6_negative_knowledge_and_gerrit_abandoned() {
     let res2 = pipeline2.run(input2).await.expect("Run 2 must succeed");
     assert_eq!(res2.resolution_node_id.as_deref(), Some("RES-MOTOCAM-5002-01"));
 
+    // Verify prior resolution on disk retains NodeStatus::Abandoned (ADR 0003 forward-only supersession)
+    let doc1_after = akashic_vault::parse_markdown_file(vault_temp.path(), &res_path).unwrap();
+    assert_eq!(
+        doc1_after.frontmatter.status,
+        NodeStatus::Abandoned,
+        "Prior resolution must retain Abandoned status on disk"
+    );
+
     let res2_path = vault_temp
         .path()
         .join("resolutions/RES-MOTOCAM-5002-01.md");
     let doc2 = akashic_vault::parse_markdown_file(vault_temp.path(), &res2_path).unwrap();
+    assert!(
+        matches!(doc2.frontmatter.status, NodeStatus::Active | NodeStatus::Proposed),
+        "New resolution must have Active or Proposed status, got {:?}",
+        doc2.frontmatter.status
+    );
     assert!(
         doc2.frontmatter
             .relations
@@ -649,6 +662,18 @@ async fn test_two_phase_prepare_and_submit_finding() {
         .filter(|i| i.severity == akashic_lint::Severity::Error)
         .count();
     assert_eq!(error_count, 0, "Vault must have 0 lint errors");
+
+    // Verify HYPOTHESIS_FALSIFIED checkpoint and curation report persistence
+    let checkpoints = state_store.get_checkpoints("run-twophase-001").unwrap();
+    assert!(
+        checkpoints.iter().any(|c| c.stage_name == "HYPOTHESIS_FALSIFIED"),
+        "Checkpoints must include HYPOTHESIS_FALSIFIED"
+    );
+    let cur_report = state_store.get_curation_report("run-twophase-001").unwrap();
+    assert!(
+        cur_report.is_some(),
+        "Curation report must be persisted on workflow run"
+    );
 }
 
 // Test 8 (Seam 1): Curation gate invariants C001, C002, and C004 enforcement

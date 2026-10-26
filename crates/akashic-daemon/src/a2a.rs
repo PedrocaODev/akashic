@@ -1,6 +1,6 @@
 use crate::DaemonError;
 use akashic_rca::{
-    CandidateFinding, ConductorPipeline, CurationReport, CurationVerdict,
+    CandidateFinding, CandidateFindingRecord, ConductorPipeline, CurationReport, CurationVerdict,
     MockStage4Executor, PipelineInput, RcaError, StateStore, WorkflowRunRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,73 @@ pub struct A2aTask {
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+fn default_tasks_limit() -> usize {
+    50
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TasksListParams {
+    #[serde(default = "default_tasks_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+impl Default for TasksListParams {
+    fn default() -> Self {
+        Self {
+            limit: default_tasks_limit(),
+            status: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaskIdParams {
+    #[serde(alias = "taskId", alias = "task_id", alias = "run_id")]
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TasksSendParams {
+    #[serde(default, alias = "taskId", alias = "task_id", alias = "id")]
+    pub run_id: Option<String>,
+    #[serde(default, alias = "candidate_id")]
+    pub winning_candidate_id: Option<String>,
+    #[serde(default, alias = "candidate_finding", alias = "data", alias = "data_part")]
+    pub finding: Option<serde_json::Value>,
+    #[serde(default, alias = "jiraKey")]
+    pub jira_key: Option<String>,
+    #[serde(default, alias = "appId")]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub device: Option<String>,
+    #[serde(default, alias = "androidVersion")]
+    pub android_version: Option<String>,
+    #[serde(default, alias = "rawLogs", alias = "logs", alias = "text")]
+    pub raw_logs: Option<String>,
+    #[serde(default, alias = "vaultPath")]
+    pub vault_path: Option<PathBuf>,
+    #[serde(default, alias = "graphStore")]
+    pub graph_store: Option<PathBuf>,
+    #[serde(default, alias = "priorResolutionId")]
+    pub prior_resolution_id: Option<String>,
+    #[serde(default, alias = "policyPath")]
+    pub policy_path: Option<PathBuf>,
+}
+
+fn parse_task_id(params: &serde_json::Value) -> Result<String, (i64, String)> {
+    if let Some(s) = params.as_str() {
+        if !s.is_empty() {
+            return Ok(s.to_string());
+        }
+    }
+    match serde_json::from_value::<TaskIdParams>(params.clone()) {
+        Ok(p) if !p.id.is_empty() => Ok(p.id),
+        _ => Err((-32602, "Missing 'id' parameter".to_string())),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -208,10 +275,19 @@ impl A2aServer {
         }
     }
 
-    fn build_a2a_task(
+    pub fn build_a2a_task(
         &self,
         run: &WorkflowRunRecord,
         report: Option<&CurationReport>,
+    ) -> Result<A2aTask, RcaError> {
+        self.build_a2a_task_with_candidates(run, report, None)
+    }
+
+    pub fn build_a2a_task_with_candidates(
+        &self,
+        run: &WorkflowRunRecord,
+        report: Option<&CurationReport>,
+        preloaded_candidates: Option<Vec<CandidateFindingRecord>>,
     ) -> Result<A2aTask, RcaError> {
         let state = match run.status.as_str() {
             "AWAITING_REASONING" | "AWAITING_CURATION" => A2aTaskState::InputRequired,
@@ -244,7 +320,24 @@ impl A2aServer {
             });
         }
 
-        let curation_report_val = report.and_then(|r| serde_json::to_value(r).ok());
+        let loaded_report: Option<CurationReport> = match report {
+            Some(r) => Some(r.clone()),
+            None => run
+                .curation_report_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .or_else(|| {
+                    self.state_store
+                        .get_curation_report(&run.run_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|json| serde_json::from_str(&json).ok())
+                }),
+        };
+
+        let curation_report_val = loaded_report
+            .as_ref()
+            .and_then(|r| serde_json::to_value(r).ok());
         if let Some(ref rep) = curation_report_val {
             artifacts.push(A2aArtifact {
                 id: format!("{}-curation-report", run.run_id),
@@ -253,10 +346,13 @@ impl A2aServer {
             });
         }
 
-        let candidates = self
-            .state_store
-            .list_candidate_findings(&run.run_id)
-            .unwrap_or_default();
+        let candidates = match preloaded_candidates {
+            Some(cands) => cands,
+            None => self
+                .state_store
+                .list_candidate_findings(&run.run_id)
+                .unwrap_or_default(),
+        };
         let candidates_val = serde_json::to_value(&candidates).ok();
 
         let result_val = if let Some(ref rep) = curation_report_val {
@@ -274,7 +370,7 @@ impl A2aServer {
             None
         };
 
-        let error_msg = if let Some(rep) = report {
+        let error_msg = if let Some(ref rep) = loaded_report {
             if rep.verdict == CurationVerdict::Rejected {
                 Some(
                     rep.issues
@@ -311,33 +407,57 @@ impl A2aServer {
     }
 
     fn handle_tasks_list(&self, params: &serde_json::Value) -> Result<serde_json::Value, (i64, String)> {
-        let limit = params
-            .get("limit")
-            .and_then(|l| l.as_u64())
-            .unwrap_or(50) as usize;
-        let status_filter = params
-            .get("status")
-            .and_then(|s| s.as_str());
+        let list_params: TasksListParams = if params.is_null()
+            || (params.is_array() && params.as_array().map_or(false, |a| a.is_empty()))
+        {
+            TasksListParams::default()
+        } else {
+            serde_json::from_value(params.clone())
+                .map_err(|e| (-32602, format!("Invalid params: {}", e)))?
+        };
 
-        let runs = self
+        let (runs, filter_by_task_state) = match list_params.status.as_deref() {
+            None => (
+                self.state_store
+                    .list_workflow_runs_paginated(None, list_params.limit)
+                    .map_err(|e| (-32000, format!("Failed to list runs: {}", e)))?,
+                None,
+            ),
+            Some(s) if s.chars().all(|c| c.is_ascii_uppercase() || c == '_') => (
+                self.state_store
+                    .list_workflow_runs_paginated(Some(s), list_params.limit)
+                    .map_err(|e| (-32000, format!("Failed to list runs: {}", e)))?,
+                None,
+            ),
+            Some(s) => (
+                self.state_store
+                    .list_workflow_runs_paginated(None, (list_params.limit * 4).max(50))
+                    .map_err(|e| (-32000, format!("Failed to list runs: {}", e)))?,
+                Some(s.to_string()),
+            ),
+        };
+
+        let run_ids: Vec<String> = runs.iter().map(|r| r.run_id.clone()).collect();
+        let mut candidates_map = self
             .state_store
-            .list_workflow_runs()
-            .map_err(|e| (-32000, format!("Failed to list runs: {}", e)))?;
+            .list_candidate_findings_for_runs(&run_ids)
+            .unwrap_or_default();
 
         let mut tasks = Vec::new();
         for run in runs {
-            if let Ok(task) = self.build_a2a_task(&run, None) {
-                if let Some(filter) = status_filter {
+            let preloaded = candidates_map.remove(&run.run_id);
+            if let Ok(task) = self.build_a2a_task_with_candidates(&run, None, preloaded) {
+                if let Some(ref filter) = filter_by_task_state {
                     let task_state_str = serde_json::to_string(&task.state)
                         .unwrap_or_default()
                         .trim_matches('"')
                         .to_string();
-                    if task_state_str != filter {
+                    if &task_state_str != filter {
                         continue;
                     }
                 }
                 tasks.push(task);
-                if tasks.len() >= limit {
+                if tasks.len() >= list_params.limit {
                     break;
                 }
             }
@@ -347,18 +467,11 @@ impl A2aServer {
     }
 
     fn handle_tasks_get(&self, params: &serde_json::Value) -> Result<serde_json::Value, (i64, String)> {
-        let id = params
-            .get("id")
-            .or_else(|| params.get("taskId"))
-            .or_else(|| params.get("task_id"))
-            .or_else(|| params.get("run_id"))
-            .and_then(|i| i.as_str())
-            .or_else(|| params.as_str())
-            .ok_or_else(|| (-32602, "Missing 'id' parameter".to_string()))?;
+        let id = parse_task_id(params)?;
 
         let run = self
             .state_store
-            .get_workflow_run(id)
+            .get_workflow_run(&id)
             .map_err(|e| (-32000, format!("Database error: {}", e)))?
             .ok_or_else(|| (-32602, format!("Task '{}' not found", id)))?;
 
@@ -370,28 +483,21 @@ impl A2aServer {
     }
 
     fn handle_tasks_cancel(&self, params: &serde_json::Value) -> Result<serde_json::Value, (i64, String)> {
-        let id = params
-            .get("id")
-            .or_else(|| params.get("taskId"))
-            .or_else(|| params.get("task_id"))
-            .or_else(|| params.get("run_id"))
-            .and_then(|i| i.as_str())
-            .or_else(|| params.as_str())
-            .ok_or_else(|| (-32602, "Missing 'id' parameter".to_string()))?;
+        let id = parse_task_id(params)?;
 
         let run = self
             .state_store
-            .get_workflow_run(id)
+            .get_workflow_run(&id)
             .map_err(|e| (-32000, format!("Database error: {}", e)))?
             .ok_or_else(|| (-32602, format!("Task '{}' not found", id)))?;
 
         self.state_store
-            .update_workflow_run(id, "CANCELED", "CANCELED", run.crash_signature.as_deref(), &run.context_json)
+            .update_workflow_run(&id, "CANCELED", "CANCELED", run.crash_signature.as_deref(), &run.context_json)
             .map_err(|e| (-32000, format!("Failed to cancel task: {}", e)))?;
 
         let updated_run = self
             .state_store
-            .get_workflow_run(id)
+            .get_workflow_run(&id)
             .map_err(|e| (-32000, format!("Database error: {}", e)))?
             .unwrap_or(run);
 
@@ -403,27 +509,29 @@ impl A2aServer {
     }
 
     fn handle_tasks_send(&self, params: &serde_json::Value) -> Result<serde_json::Value, (i64, String)> {
-        let run_id_opt = params
-            .get("taskId")
-            .or_else(|| params.get("task_id"))
-            .or_else(|| params.get("run_id"))
-            .or_else(|| params.get("id"))
-            .and_then(|v| v.as_str());
+        let send_params: TasksSendParams = serde_json::from_value(params.clone())
+            .map_err(|e| (-32602, format!("Invalid params: {}", e)))?;
 
         // Check if winning_candidate_id adjudication is requested
-        if let Some(winning_cand) = params
-            .get("winning_candidate_id")
-            .or_else(|| params.get("candidate_id"))
-            .and_then(|v| v.as_str())
-        {
-            let run_id = run_id_opt.ok_or_else(|| {
+        if let Some(ref winning_cand) = send_params.winning_candidate_id {
+            let run_id = send_params.run_id.as_deref().ok_or_else(|| {
                 (-32602, "Missing 'taskId' or 'run_id' for curation".to_string())
             })?;
 
+            let vault_path = send_params
+                .vault_path
+                .as_deref()
+                .unwrap_or(&self.config.vault_path);
+
             let (_ctx, report) = self
                 .pipeline
-                .curate_investigation(run_id, winning_cand, &self.config.vault_path)
+                .curate_investigation(run_id, winning_cand, vault_path)
                 .map_err(|e| (-32000, format!("Curation adjudication failed: {}", e)))?;
+
+            let _ = self.state_store.save_curation_report(
+                run_id,
+                &serde_json::to_string(&report).unwrap_or_default(),
+            );
 
             let run = self
                 .state_store
@@ -439,111 +547,90 @@ impl A2aServer {
         }
 
         // Check if CandidateFinding submission is requested
-        let finding_val = params
-            .get("finding")
-            .or_else(|| params.get("candidate_finding"))
-            .or_else(|| params.get("data"))
-            .or_else(|| params.get("data_part"))
-            .or_else(|| {
-                if params.get("primary_hypothesis").is_some() {
-                    Some(params)
-                } else {
-                    None
+        let finding_val = send_params.finding.as_ref().or_else(|| {
+            if params.get("primary_hypothesis").is_some() {
+                Some(params)
+            } else {
+                None
+            }
+        });
+
+        if let (Some(ref run_id), Some(finding_json)) = (send_params.run_id.as_deref(), finding_val) {
+            match serde_json::from_value::<CandidateFinding>(finding_json.clone()) {
+                Ok(mut finding) => {
+                    if finding.run_id.is_none() {
+                        finding.run_id = Some(run_id.to_string());
+                    }
+
+                    let vault_path = send_params
+                        .vault_path
+                        .as_deref()
+                        .unwrap_or(&self.config.vault_path);
+
+                    let (_ctx, report) = self
+                        .pipeline
+                        .submit_finding(run_id, &finding, vault_path)
+                        .map_err(|e| (-32000, format!("Submit finding failed: {}", e)))?;
+
+                    let _ = self.state_store.save_curation_report(
+                        run_id,
+                        &serde_json::to_string(&report).unwrap_or_default(),
+                    );
+
+                    let run = self
+                        .state_store
+                        .get_workflow_run(run_id)
+                        .map_err(|e| (-32000, format!("Database error: {}", e)))?
+                        .ok_or_else(|| (-32602, format!("Run '{}' not found", run_id)))?;
+
+                    let task = self
+                        .build_a2a_task(&run, Some(&report))
+                        .map_err(|e| (-32000, format!("Error building task: {}", e)))?;
+
+                    return Ok(serde_json::to_value(task).unwrap_or(serde_json::Value::Null));
                 }
-            });
-
-        if let (Some(run_id), Some(finding_json)) = (run_id_opt, finding_val) {
-            // Check if finding is valid CandidateFinding
-            if let Ok(mut finding) = serde_json::from_value::<CandidateFinding>(finding_json.clone()) {
-                if finding.run_id.is_none() {
-                    finding.run_id = Some(run_id.to_string());
+                Err(e) if send_params.finding.is_some() => {
+                    return Err((-32602, format!("Invalid candidate finding: {}", e)));
                 }
-
-                let (_ctx, report) = self
-                    .pipeline
-                    .submit_finding(run_id, &finding, &self.config.vault_path)
-                    .map_err(|e| (-32000, format!("Submit finding failed: {}", e)))?;
-
-                let run = self
-                    .state_store
-                    .get_workflow_run(run_id)
-                    .map_err(|e| (-32000, format!("Database error: {}", e)))?
-                    .ok_or_else(|| (-32602, format!("Run '{}' not found", run_id)))?;
-
-                let task = self
-                    .build_a2a_task(&run, Some(&report))
-                    .map_err(|e| (-32000, format!("Error building task: {}", e)))?;
-
-                return Ok(serde_json::to_value(task).unwrap_or(serde_json::Value::Null));
+                Err(_) => {}
             }
         }
 
         // Otherwise, this is Phase A: prepare_investigation
-        let jira_key = params
-            .get("jira_key")
-            .or_else(|| params.get("jiraKey"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("INC-UNKNOWN")
-            .to_string();
+        let jira_key = send_params
+            .jira_key
+            .unwrap_or_else(|| "INC-UNKNOWN".to_string());
 
-        let app_id = params
-            .get("app_id")
-            .or_else(|| params.get("appId"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("com.unknown.app")
-            .to_string();
+        let app_id = send_params
+            .app_id
+            .unwrap_or_else(|| "com.unknown.app".to_string());
 
-        let device = params
-            .get("device")
-            .and_then(|v| v.as_str())
-            .unwrap_or("generic")
-            .to_string();
+        let device = send_params
+            .device
+            .unwrap_or_else(|| "generic".to_string());
 
-        let android_version = params
-            .get("android_version")
-            .or_else(|| params.get("androidVersion"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("14")
-            .to_string();
+        let android_version = send_params
+            .android_version
+            .unwrap_or_else(|| "14".to_string());
 
-        let raw_logs = params
-            .get("raw_logs")
-            .or_else(|| params.get("rawLogs"))
-            .or_else(|| params.get("logs"))
-            .or_else(|| params.get("text"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let raw_logs = send_params.raw_logs.unwrap_or_default();
 
-        let vault_path = params
-            .get("vault_path")
-            .or_else(|| params.get("vaultPath"))
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
+        let vault_path = send_params
+            .vault_path
             .unwrap_or_else(|| self.config.vault_path.clone());
 
-        let graph_store = params
-            .get("graph_store")
-            .or_else(|| params.get("graphStore"))
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
+        let graph_store = send_params
+            .graph_store
             .or_else(|| self.config.graph_store.clone());
 
-        let prior_resolution_id = params
-            .get("prior_resolution_id")
-            .or_else(|| params.get("priorResolutionId"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let prior_resolution_id = send_params.prior_resolution_id;
 
-        let policy_path = params
-            .get("policy_path")
-            .or_else(|| params.get("policyPath"))
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
+        let policy_path = send_params
+            .policy_path
             .or_else(|| self.config.policy_path.clone());
 
         let input = PipelineInput {
-            run_id: run_id_opt.map(|s| s.to_string()),
+            run_id: send_params.run_id,
             legacy_session_id: None,
             jira_key,
             app_id,

@@ -202,29 +202,17 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Rca { command } => {
             let rca_db_path = PathBuf::from(&ctx.config.rca.db_path);
+            if let Some(parent) = rca_db_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
             let vault_path = ctx.resolve_vault_path(None);
             match command {
                 RcaCommands::Run(args) => {
                     let state_store = rca::store::StateStore::open(&rca_db_path)?;
                     let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
-                    let raw_log = if let Some(file) = args.log_file {
-                        std::fs::read_to_string(&file)?
-                    } else {
-                        args.raw_log.unwrap_or_default()
-                    };
-                    let input = rca::pipeline::PipelineInput {
-                        run_id: None,
-                        legacy_session_id: None,
-                        jira_key: args.jira_key.unwrap_or_else(|| "CLI-RCA".into()),
-                        app_id: args.app_id.unwrap_or_default(),
-                        device: "cli-device".into(),
-                        android_version: "14".into(),
-                        raw_logs: raw_log,
-                        vault_path: vault_path.clone(),
-                        graph_store: Some(PathBuf::from(&ctx.config.engine.db_path)),
-                        prior_resolution_id: None,
-                        policy_path: None,
-                    };
+                    let input = build_pipeline_input(&args, vault_path.clone(), Some(PathBuf::from(&ctx.config.engine.db_path)))?;
 
                     if args.two_phase || args.prepare_only || args.finding_file.is_some() {
                         let (rca_ctx, packet) = pipeline.prepare_investigation(input)?;
@@ -246,24 +234,7 @@ async fn main() -> anyhow::Result<()> {
                 RcaCommands::Prepare(args) => {
                     let state_store = rca::store::StateStore::open(&rca_db_path)?;
                     let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
-                    let raw_log = if let Some(file) = args.log_file {
-                        std::fs::read_to_string(&file)?
-                    } else {
-                        args.raw_log.unwrap_or_default()
-                    };
-                    let input = rca::pipeline::PipelineInput {
-                        run_id: None,
-                        legacy_session_id: None,
-                        jira_key: args.jira_key.unwrap_or_else(|| "CLI-RCA".into()),
-                        app_id: args.app_id.unwrap_or_default(),
-                        device: "cli-device".into(),
-                        android_version: "14".into(),
-                        raw_logs: raw_log,
-                        vault_path: vault_path.clone(),
-                        graph_store: Some(PathBuf::from(&ctx.config.engine.db_path)),
-                        prior_resolution_id: None,
-                        policy_path: None,
-                    };
+                    let input = build_pipeline_input(&args, vault_path.clone(), Some(PathBuf::from(&ctx.config.engine.db_path)))?;
 
                     let (_rca_ctx, packet) = pipeline.prepare_investigation(input)?;
                     if let Some(pkt) = packet {
@@ -318,37 +289,16 @@ async fn main() -> anyhow::Result<()> {
                 }
                 RcaCommands::Crystallize(args) => {
                     let state_store = rca::store::StateStore::open(&rca_db_path)?;
-                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store, rca::stage4::MockStage4Executor::new());
+                    let pipeline = rca::pipeline::ConductorPipeline::new(state_store.clone(), rca::stage4::MockStage4Executor::new());
 
                     if let Some(ref file) = args.finding_file {
                         let content = std::fs::read_to_string(file)?;
                         let finding: rca::CandidateFinding = serde_json::from_str(&content)?;
                         let (_ctx, report) = pipeline.submit_finding(&args.run_id, &finding, &vault_path)?;
+                        let _ = state_store.save_curation_report(&args.run_id, &serde_json::to_string(&report).unwrap_or_default());
                         println!("Submitted finding: verdict={:?}", report.verdict);
                     } else {
-                        let outcome = match args.outcome.as_deref().unwrap_or("resolved") {
-                            "inconclusive" => rca::FindingOutcome::Inconclusive,
-                            _ => rca::FindingOutcome::Resolved,
-                        };
-                        let finding = rca::CandidateFinding {
-                            candidate_id: None,
-                            agent_id: None,
-                            run_id: Some(args.run_id.clone()),
-                            storm_candidate_id: None,
-                            outcome,
-                            primary_hypothesis: args.summary.clone().unwrap_or_else(|| "CLI Finding".to_string()),
-                            falsification_attempts: vec!["CLI empirical analysis".to_string()],
-                            invalidated_hypotheses: vec![],
-                            failed_attempts: vec![],
-                            confidence_score: args.confidence.unwrap_or(1.0),
-                            remediation_proposal: args.remediation.unwrap_or_else(|| args.summary.unwrap_or_default()),
-                            remediation_type: Some("permanent_fix".to_string()),
-                            supersedes_resolution_id: None,
-                            hold_for_curation: args.hold_for_curation,
-                            affected_symbols: vec![],
-                        };
-                        let (_ctx, report) = pipeline.submit_finding(&args.run_id, &finding, &vault_path)?;
-                        println!("Crystallized run: verdict={:?}", report.verdict);
+                        anyhow::bail!("--finding-file is required for 'akashic rca crystallize' so findings pass CurationGate validation");
                     }
                 }
                 RcaCommands::Curate(args) => {
@@ -447,4 +397,29 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn build_pipeline_input(
+    args: &RcaRunArgs,
+    vault_path: PathBuf,
+    graph_store: Option<PathBuf>,
+) -> anyhow::Result<rca::pipeline::PipelineInput> {
+    let raw_logs = if let Some(ref file) = args.log_file {
+        std::fs::read_to_string(file)?
+    } else {
+        args.raw_log.clone().unwrap_or_default()
+    };
+    Ok(rca::pipeline::PipelineInput {
+        run_id: None,
+        legacy_session_id: None,
+        jira_key: args.jira_key.clone().unwrap_or_else(|| "CLI-RCA".into()),
+        app_id: args.app_id.clone().unwrap_or_default(),
+        device: "cli-device".into(),
+        android_version: "14".into(),
+        raw_logs,
+        vault_path,
+        graph_store,
+        prior_resolution_id: None,
+        policy_path: None,
+    })
 }

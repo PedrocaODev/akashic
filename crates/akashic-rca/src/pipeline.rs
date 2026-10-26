@@ -24,7 +24,6 @@ use akashic_vault::migrator::{
     PlannedFileChange,
 };
 use akashic_vault::parser::serialize_document;
-use akashic_vault::VaultGraph;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -163,6 +162,65 @@ impl std::fmt::Display for WorkflowStatus {
     }
 }
 
+fn parse_frontmatter_only(path: &Path) -> Result<akashic_vault::Frontmatter, RcaError> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut lines = reader.lines();
+
+    let first_line = match lines.next() {
+        Some(line) => line?,
+        None => {
+            return Err(akashic_vault::VaultError::Parse(
+                "Empty markdown file".to_string(),
+            )
+            .into())
+        }
+    };
+    if first_line.trim_start_matches('\u{feff}').trim() != "---" {
+        return Err(akashic_vault::VaultError::Parse(
+            "Missing opening '---' frontmatter delimiter".to_string(),
+        )
+        .into());
+    }
+
+    let mut yaml_lines = Vec::new();
+    let mut found_closing = false;
+    const MAX_LINES: usize = 256;
+    const MAX_BYTES: usize = 64 * 1024;
+    let mut total_bytes = 0;
+
+    for line_res in lines {
+        let line = line_res?;
+        let trimmed = line.trim();
+        if trimmed == "---" || trimmed == "..." {
+            found_closing = true;
+            break;
+        }
+        total_bytes += line.len() + 1;
+        if yaml_lines.len() >= MAX_LINES || total_bytes > MAX_BYTES {
+            return Err(akashic_vault::VaultError::Parse(
+                "Frontmatter exceeded bounded limit".to_string(),
+            )
+            .into());
+        }
+        yaml_lines.push(line);
+    }
+
+    if !found_closing {
+        return Err(akashic_vault::VaultError::Parse(
+            "Missing closing '---' or '...' frontmatter delimiter".to_string(),
+        )
+        .into());
+    }
+
+    let yaml_str = yaml_lines.join("\n");
+    let fm: akashic_vault::Frontmatter = akashic_vault::serde_yaml::from_str(&yaml_str)
+        .map_err(akashic_vault::VaultError::from)?;
+
+    Ok(fm)
+}
+
 pub struct ConductorPipeline<E: Stage4Executor = MockStage4Executor> {
     state_store: StateStore,
     stage4_executor: E,
@@ -205,6 +263,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
             updated_at: now,
             context_json: ctx_json.clone(),
             context_packet_json: None,
+            curation_report_json: None,
         };
 
         if self.state_store.get_workflow_run(&context.run_id)?.is_none() {
@@ -317,7 +376,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                     body: stack_body,
                 };
                 let mut artifact = build_evidence_node(evd_input)?;
-                artifact.frontmatter.valid_from = Some("2026-10-19".to_string());
+                artifact.frontmatter.valid_from = Some(chrono::Utc::now().format("%Y-%m-%d").to_string());
                 artifact.rendered_markdown = serialize_document(&artifact.frontmatter, &artifact.body)?;
                 write_vault_node(vault_root, "evidence", &artifact)?;
 
@@ -442,6 +501,10 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         }
 
         let report = CurationGate::validate(&packet, &finding, &vault_root)?;
+        let report_json = serde_json::to_string(&report)?;
+        self.state_store
+            .save_curation_report(&context.run_id, &report_json)?;
+
         if report.verdict == CurationVerdict::Rejected {
             if !report.lint_issues.is_empty() {
                 let err_count = report
@@ -476,7 +539,43 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         vault_path: &Path,
     ) -> Result<(), RcaError> {
         if let Some(ref plan) = report.migration_plan {
-            apply_plan_with_validator(vault_path, plan, |_| Ok(()))?;
+            let policy_path = context.policy_path.as_deref().map(PathBuf::from);
+            let v_path = vault_path.to_path_buf();
+            let _backup = apply_plan_with_validator(vault_path, plan, |preview_graph| {
+                let cfg_path = policy_path
+                    .as_ref()
+                    .filter(|p| p.exists())
+                    .cloned()
+                    .or_else(|| {
+                        let p1 = v_path.join(".akashic/config.toml");
+                        if p1.exists() {
+                            Some(p1)
+                        } else {
+                            let p2 = v_path.join("config.toml");
+                            if p2.exists() {
+                                Some(p2)
+                            } else {
+                                None
+                            }
+                        }
+                    });
+                let report = if let Some(cfg) = cfg_path {
+                    let custom_rules = std::fs::read_to_string(&cfg)
+                        .ok()
+                        .and_then(|s| akashic_lint::parse_custom_field_rules_from_toml(&s).ok())
+                        .unwrap_or_default();
+                    akashic_lint::lint_vault_with_rules(preview_graph, &custom_rules)
+                } else {
+                    akashic_lint::lint_vault(preview_graph)
+                };
+                if !report.valid {
+                    return Err(akashic_vault::VaultError::Migration(format!(
+                        "Crystallization failed vault lint: {:?}",
+                        report.issues
+                    )));
+                }
+                Ok(())
+            })?;
         }
 
         context.incident_node_id = report.incident_node_id.clone();
@@ -575,36 +674,35 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                         for entry in entries.flatten() {
                             let path = entry.path();
                             if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                                if let Ok(doc) = akashic_vault::parse_markdown_file(vault_path, &path) {
-                                    let is_match = doc.frontmatter.id == incident_id
-                                        || context.prior_resolution_id.as_deref() == Some(&doc.frontmatter.id)
-                                        || doc.frontmatter.scope.get("app") == Some(&context.app_id)
-                                        || doc.frontmatter.relations.iter().any(|r| {
+                                if let Ok(fm) = parse_frontmatter_only(&path) {
+                                    let is_match = fm.id == incident_id
+                                        || context.prior_resolution_id.as_deref() == Some(&fm.id)
+                                        || fm.scope.get("app") == Some(&context.app_id)
+                                        || fm.relations.iter().any(|r| {
                                             r.target == incident_id
                                                 || context.prior_resolution_id.as_deref() == Some(&r.target)
                                         });
 
                                     if is_match {
-                                        for h in doc.frontmatter.invalidated_hypotheses {
+                                        for h in fm.invalidated_hypotheses {
                                             if seen_hypotheses.insert(h.clone()) {
                                                 historical_invalidated_hypotheses.push(h);
                                             }
                                         }
-                                        for f in doc.frontmatter.failed_attempts {
+                                        for f in fm.failed_attempts {
                                             if seen_attempts.insert(f.clone()) {
                                                 historical_failed_attempts.push(f);
                                             }
                                         }
-                                        if *dir_name == "resolutions" || doc.frontmatter.id.starts_with("RES-") {
-                                            if seen_resolutions.insert(doc.frontmatter.id.clone()) {
+                                        if *dir_name == "resolutions" || fm.id.starts_with("RES-") {
+                                            if seen_resolutions.insert(fm.id.clone()) {
                                                 let res_summary = PriorResolutionSummary {
-                                                    resolution_id: doc.frontmatter.id.clone(),
-                                                    status: format!("{:?}", doc.frontmatter.status).to_lowercase(),
-                                                    remediation_type: doc
-                                                        .frontmatter
+                                                    resolution_id: fm.id.clone(),
+                                                    status: format!("{:?}", fm.status).to_lowercase(),
+                                                    remediation_type: fm
                                                         .remediation_type
                                                         .map(|r| format!("{:?}", r).to_lowercase()),
-                                                    abandoned_reason: doc.frontmatter.abandoned_reason.clone(),
+                                                    abandoned_reason: fm.abandoned_reason.clone(),
                                                 };
                                                 prior_resolutions.push(res_summary);
                                             }
@@ -819,6 +917,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         let record = CandidateFindingRecord {
             candidate_id: cand_id,
             run_id: run_id.to_string(),
+            agent_id: finding.agent_id.clone(),
             storm_candidate_id: None,
             outcome: outcome_str.to_string(),
             summary: finding.primary_hypothesis.clone(),
@@ -831,6 +930,9 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
             updated_at: now,
         };
         self.state_store.stage_candidate_finding(&record)?;
+
+        let report_json = serde_json::to_string(&report)?;
+        self.state_store.save_curation_report(run_id, &report_json)?;
 
         match report.verdict {
             CurationVerdict::Rejected => {
@@ -851,6 +953,9 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                 Ok((context, report))
             }
             CurationVerdict::Approved => {
+                let falsified_json = serde_json::to_string(&context)?;
+                self.state_store
+                    .save_checkpoint(&context.run_id, "HYPOTHESIS_FALSIFIED", &falsified_json)?;
                 self.apply_crystallization(&mut context, &report, finding.outcome, vault_path)?;
                 Ok((context, report))
             }
@@ -915,6 +1020,10 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
         };
 
         let report = CurationGate::validate(&packet, &winning_finding, vault_path)?;
+        let report_json = serde_json::to_string(&report)?;
+        self.state_store
+            .save_curation_report(&context.run_id, &report_json)?;
+
         if report.verdict == CurationVerdict::Rejected {
             let err_msg = report
                 .issues
@@ -927,6 +1036,10 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                 err_msg
             )));
         }
+
+        let falsified_json = serde_json::to_string(&context)?;
+        self.state_store
+            .save_checkpoint(&context.run_id, "HYPOTHESIS_FALSIFIED", &falsified_json)?;
 
         self.apply_crystallization(&mut context, &report, winning_finding.outcome, vault_path)?;
 
@@ -1051,6 +1164,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
 
                 // Update resolution node status to Resolved
                 let res_dir = vault_path.join("resolutions");
+                let mut planned_changes = Vec::new();
                 if res_dir.exists() {
                     if let Ok(entries) = std::fs::read_dir(&res_dir) {
                         for entry in entries.flatten() {
@@ -1077,10 +1191,23 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                                             relations: doc.frontmatter.relations.clone(),
                                             body: doc.body.clone(),
                                         })?;
-                                        artifact.frontmatter.valid_from = doc.frontmatter.valid_from.clone().or_else(|| Some("2026-10-19".to_string()));
+                                        artifact.frontmatter.valid_from = doc.frontmatter.valid_from.clone().or_else(|| Some(chrono::Utc::now().format("%Y-%m-%d").to_string()));
                                         artifact.frontmatter.failed_attempts = doc.frontmatter.failed_attempts.clone();
                                         artifact.rendered_markdown = serialize_document(&artifact.frontmatter, &artifact.body)?;
-                                        write_vault_node(vault_path, "resolutions", &artifact)?;
+
+                                        let old_content = std::fs::read_to_string(&path)?;
+                                        let new_content = artifact.rendered_markdown;
+                                        let rel_path = path.strip_prefix(vault_path).unwrap_or(&path).to_path_buf();
+                                        let rel_path_str = rel_path.to_string_lossy().to_string();
+                                        let diff = generate_unified_diff(&rel_path_str, &old_content, &new_content);
+                                        planned_changes.push(PlannedFileChange {
+                                            path: rel_path_str,
+                                            action: ChangeAction::Modify,
+                                            diff,
+                                            before_sha256: sha256_hex(old_content.as_bytes()),
+                                            after_sha256: sha256_hex(new_content.as_bytes()),
+                                            new_content: Some(new_content),
+                                        });
                                     }
                                 }
                             }
@@ -1088,14 +1215,22 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                     }
                 }
 
-                // Lint gate: validate vault graph
-                let graph = VaultGraph::from_dir(vault_path)?;
-                let report = akashic_lint::lint_vault(&graph);
-                if !report.valid {
-                    return Err(RcaError::VaultLintFailed(
-                        report.error_count,
-                        report.issues,
-                    ));
+                if !planned_changes.is_empty() {
+                    let plan = MigrationPlan {
+                        plan_version: "1.0.0".to_string(),
+                        vault_root: vault_path.to_string_lossy().to_string(),
+                        changes: planned_changes,
+                    };
+                    apply_plan_with_validator(vault_path, &plan, |preview_graph| {
+                        let report = akashic_lint::lint_vault(preview_graph);
+                        if !report.valid {
+                            return Err(akashic_vault::VaultError::Migration(format!(
+                                "Pre-apply lint gate failed with {} error(s)",
+                                report.error_count
+                            )));
+                        }
+                        Ok(())
+                    })?;
                 }
             }
             GerritEvent::ChangeAbandoned {
@@ -1148,7 +1283,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                                             relations: doc.frontmatter.relations.clone(),
                                             body: doc.body.clone(),
                                         })?;
-                                        artifact.frontmatter.valid_from = doc.frontmatter.valid_from.clone().or_else(|| Some("2026-10-19".to_string()));
+                                        artifact.frontmatter.valid_from = doc.frontmatter.valid_from.clone().or_else(|| Some(chrono::Utc::now().format("%Y-%m-%d").to_string()));
                                         artifact.frontmatter.failed_attempts = failed_attempts;
                                         artifact.rendered_markdown = serialize_document(&artifact.frontmatter, &artifact.body)?;
 
@@ -1191,17 +1326,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                 }
 
                 // Auto-requeue follow-up investigation in AWAITING_REASONING and relink storm signature
-                let runs = self.state_store.list_workflow_runs().unwrap_or_default();
-                let original_run = runs.into_iter().rev().find(|r| {
-                    if format!("INC-{}", r.jira_key) == *incident_id {
-                        return true;
-                    }
-                    if let Ok(ctx) = serde_json::from_str::<PipelineContext>(&r.context_json) {
-                        ctx.incident_node_id.as_deref() == Some(incident_id)
-                    } else {
-                        false
-                    }
-                });
+                let original_run = self.state_store.find_latest_run_for_incident(incident_id)?;
 
                 if let Some(orig) = original_run {
                     if let Ok(mut new_context) = serde_json::from_str::<PipelineContext>(&orig.context_json) {
@@ -1235,6 +1360,7 @@ impl<E: Stage4Executor> ConductorPipeline<E> {
                             crash_signature: new_context.crash_signature.clone(),
                             context_json: new_ctx_json.clone(),
                             context_packet_json: Some(refreshed_json.clone()),
+                            curation_report_json: None,
                             created_at: now,
                             updated_at: now,
                         };

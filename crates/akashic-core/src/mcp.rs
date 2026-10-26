@@ -15,8 +15,8 @@ use akashic_rca::symbolicator::{
 };
 use akashic_rca::CurationVerdict;
 use akashic_vault::{
-    build_resolution_node, query::query, query::query_current, query::query_lineage,
-    serialize_document, Frontmatter, NodeStatus, NodeType, QueryMode, ResolutionInput, Scope,
+    query::query, query::query_current, query::query_lineage,
+    serialize_document, Frontmatter, NodeStatus, NodeType, QueryMode, Scope,
     VaultGraph,
 };
 
@@ -717,6 +717,23 @@ impl AkashicMcpServer {
 
         match store.get_workflow_run(&params.investigation_id) {
             Ok(Some(run)) => {
+                let checkpoints: Vec<String> = store
+                    .get_checkpoints(&params.investigation_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|rec| rec.stage_name)
+                    .collect();
+                let curation_report: Option<serde_json::Value> = run
+                    .curation_report_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .or_else(|| {
+                        store
+                            .get_curation_report(&params.investigation_id)
+                            .ok()
+                            .flatten()
+                            .and_then(|s| serde_json::from_str(&s).ok())
+                    });
                 let context_packet_val: Option<serde_json::Value> = store
                     .get_context_packet(&params.investigation_id)
                     .ok()
@@ -726,6 +743,15 @@ impl AkashicMcpServer {
                     .list_candidate_findings(&params.investigation_id)
                     .unwrap_or_default();
                 let res = serde_json::json!({
+                    "investigation_id": run.run_id,
+                    "jira_key": run.jira_key,
+                    "status": run.status,
+                    "current_stage": run.current_stage,
+                    "crash_signature": run.crash_signature,
+                    "created_at": run.created_at,
+                    "updated_at": run.updated_at,
+                    "checkpoints": checkpoints,
+                    "curation_report": curation_report,
                     "workflow_run": run,
                     "context_packet": context_packet_val,
                     "candidate_findings": candidates,
@@ -853,146 +879,114 @@ impl AkashicMcpServer {
         }
 
         let db_path = self.rca_db_path();
-        let state_store = if db_path.exists() {
-            StateStore::open(&db_path).ok()
-        } else {
-            None
+        if !db_path.exists() {
+            return tool_err(format!(
+                "Workflow run '{}' not found in RCA state store; run rca_trigger first",
+                params.run_id
+            ));
+        }
+
+        let store = match StateStore::open(&db_path) {
+            Ok(s) => s,
+            Err(e) => return tool_err(format!("Failed to open RCA state store: {}", e)),
         };
 
-        if let Some(store) = state_store {
-            let pipeline = ConductorPipeline::new(store.clone(), MockStage4Executor::new());
-
-            // If winning_candidate_id is set, adjudicate
-            if let Some(ref winning_id) = params.winning_candidate_id {
-                match pipeline.curate_investigation(&params.run_id, winning_id, &self.vault_path) {
-                    Ok((_ctx, report)) => return tool_ok(&report),
-                    Err(e) => return tool_err(format!("Curation adjudication failed: {}", e)),
-                }
+        match store.get_workflow_run(&params.run_id) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return tool_err(format!(
+                    "Workflow run '{}' not found in RCA state store; run rca_trigger first",
+                    params.run_id
+                ));
             }
+            Err(e) => return tool_err(format!("Failed to query workflow run: {}", e)),
+        }
 
-            // Check if run exists in state_store
-            if store.get_workflow_run(&params.run_id).ok().flatten().is_some()
-                || params.primary_hypothesis.is_some()
-                || params.finding_file.is_some()
-            {
-                let finding_result: Result<CandidateFinding, String> = if let Some(ref file_path) = params.finding_file {
-                    std::fs::read_to_string(file_path)
-                        .map_err(|e| format!("Failed to read finding file: {}", e))
-                        .and_then(|content| {
-                            serde_json::from_str::<CandidateFinding>(&content)
-                                .map_err(|e| format!("Failed to parse CandidateFinding JSON: {}", e))
-                        })
-                } else {
-                    let outcome = match params.outcome.as_deref().unwrap_or("resolved").to_ascii_lowercase().as_str() {
-                        "inconclusive" => FindingOutcome::Inconclusive,
-                        _ => FindingOutcome::Resolved,
-                    };
-                    let primary = params
-                        .primary_hypothesis
-                        .or_else(|| params.summary.clone())
-                        .unwrap_or_else(|| "Investigation finding".to_string());
-                    let remediation = params
-                        .remediation_proposal
-                        .or_else(|| params.summary.clone())
-                        .unwrap_or_else(|| "Remediation applied".to_string());
-                    let falsification = params.falsification_attempts.unwrap_or_default();
-                    let invalidated = params.invalidated_hypotheses.unwrap_or_default();
-                    let failed = params.failed_attempts.unwrap_or_default();
-                    let conf = params.confidence_score.unwrap_or(1.0);
-                    let rem_type = params.remediation_type.or_else(|| Some("permanent_fix".to_string()));
-                    let hold = params.hold_for_curation.unwrap_or(false);
+        let pipeline = ConductorPipeline::new(store.clone(), MockStage4Executor::new());
 
-                    Ok(CandidateFinding {
-                        candidate_id: params.candidate_id,
-                        agent_id: params.agent_id,
-                        run_id: Some(params.run_id.clone()),
-                        storm_candidate_id: None,
-                        outcome,
-                        primary_hypothesis: primary,
-                        falsification_attempts: falsification,
-                        invalidated_hypotheses: invalidated,
-                        failed_attempts: failed,
-                        confidence_score: conf,
-                        remediation_proposal: remediation,
-                        remediation_type: rem_type,
-                        supersedes_resolution_id: None,
-                        hold_for_curation: hold,
-                        affected_symbols: vec![],
-                    })
-                };
-
-                let finding = match finding_result {
-                    Ok(f) => f,
-                    Err(e) => return tool_err(e),
-                };
-
-                match pipeline.submit_finding(&params.run_id, &finding, &self.vault_path) {
-                    Ok((_ctx, report)) => {
-                        if report.verdict == CurationVerdict::Rejected {
-                            let issues_str = report
-                                .issues
-                                .iter()
-                                .map(|i| format!("{}: {}", i.invariant, i.message))
-                                .collect::<Vec<_>>()
-                                .join("; ");
-                            return tool_err(format!("Curation gate rejected finding: {}", issues_str));
-                        }
-                        return tool_ok(&report);
-                    }
-                    Err(e) => return tool_err(format!("Submit finding failed: {}", e)),
+        // If winning_candidate_id is set, adjudicate
+        if let Some(ref winning_id) = params.winning_candidate_id {
+            match pipeline.curate_investigation(&params.run_id, winning_id, &self.vault_path) {
+                Ok((_ctx, report)) => {
+                    let _ = store.save_curation_report(
+                        &params.run_id,
+                        &serde_json::to_string(&report).unwrap_or_default(),
+                    );
+                    return tool_ok(&report);
                 }
+                Err(e) => return tool_err(format!("Curation adjudication failed: {}", e)),
             }
         }
 
-        // Legacy fallback
-        let summary = params.summary.unwrap_or_default();
-        let res_input = ResolutionInput {
-            id: format!("RES-{}", params.run_id),
-            title: format!("Resolution for {}", params.run_id),
-            incident_id: Some(format!("INC-{}", params.run_id)),
-            remediation_type: akashic_vault::RemediationType::Hotfix,
-            status: Some(NodeStatus::Resolved),
-            abandoned_reason: None,
-            scope: Scope::new(),
-            external_refs: None,
-            relations: vec![],
-            body: summary,
+        let finding_result: Result<CandidateFinding, String> = if let Some(ref file_path) = params.finding_file {
+            std::fs::read_to_string(file_path)
+                .map_err(|e| format!("Failed to read finding file: {}", e))
+                .and_then(|content| {
+                    serde_json::from_str::<CandidateFinding>(&content)
+                        .map_err(|e| format!("Failed to parse CandidateFinding JSON: {}", e))
+                })
+        } else {
+            let outcome = match params.outcome.as_deref().unwrap_or("resolved").to_ascii_lowercase().as_str() {
+                "inconclusive" => FindingOutcome::Inconclusive,
+                _ => FindingOutcome::Resolved,
+            };
+            let primary = params
+                .primary_hypothesis
+                .or_else(|| params.summary.clone())
+                .unwrap_or_else(|| "Investigation finding".to_string());
+            let remediation = params
+                .remediation_proposal
+                .or_else(|| params.summary.clone())
+                .unwrap_or_else(|| "Remediation applied".to_string());
+            let falsification = params.falsification_attempts.unwrap_or_default();
+            let invalidated = params.invalidated_hypotheses.unwrap_or_default();
+            let failed = params.failed_attempts.unwrap_or_default();
+            let conf = params.confidence_score.unwrap_or(1.0);
+            let rem_type = params.remediation_type.or_else(|| Some("permanent_fix".to_string()));
+            let hold = params.hold_for_curation.unwrap_or(false);
+
+            Ok(CandidateFinding {
+                candidate_id: params.candidate_id,
+                agent_id: params.agent_id,
+                run_id: Some(params.run_id.clone()),
+                storm_candidate_id: None,
+                outcome,
+                primary_hypothesis: primary,
+                falsification_attempts: falsification,
+                invalidated_hypotheses: invalidated,
+                failed_attempts: failed,
+                confidence_score: conf,
+                remediation_proposal: remediation,
+                remediation_type: rem_type,
+                supersedes_resolution_id: None,
+                hold_for_curation: hold,
+                affected_symbols: vec![],
+            })
         };
 
-        match build_resolution_node(res_input) {
-            Ok(artifact) => {
-                let rel_path_str = format!("resolutions/{}.md", artifact.id);
-                let target_path = self.vault_path.join(&rel_path_str);
-                let (action, before_sha256, old_content) = if target_path.exists() {
-                    let old = std::fs::read_to_string(&target_path).unwrap_or_default();
-                    let sha = akashic_vault::sha256_hex(old.as_bytes());
-                    (akashic_vault::ChangeAction::Modify, sha, old)
-                } else {
-                    (akashic_vault::ChangeAction::Create, String::new(), String::new())
-                };
+        let finding = match finding_result {
+            Ok(f) => f,
+            Err(e) => return tool_err(e),
+        };
 
-                let diff = akashic_vault::generate_unified_diff(&rel_path_str, &old_content, &artifact.rendered_markdown);
-                let change = akashic_vault::PlannedFileChange {
-                    path: rel_path_str,
-                    action,
-                    diff,
-                    before_sha256,
-                    after_sha256: akashic_vault::sha256_hex(artifact.rendered_markdown.as_bytes()),
-                    new_content: Some(artifact.rendered_markdown),
-                };
-
-                let plan = akashic_vault::MigrationPlan {
-                    plan_version: "1.0.0".to_string(),
-                    vault_root: self.vault_path.to_string_lossy().to_string(),
-                    changes: vec![change],
-                };
-
-                match akashic_vault::apply_plan_with_validator(&self.vault_path, &plan, |_| Ok(())) {
-                    Ok(_) => tool_text(format!("Crystallized resolution to {}", target_path.display())),
-                    Err(e) => tool_err(format!("Failed to apply migration plan: {}", e)),
+        match pipeline.submit_finding(&params.run_id, &finding, &self.vault_path) {
+            Ok((_ctx, report)) => {
+                let _ = store.save_curation_report(
+                    &params.run_id,
+                    &serde_json::to_string(&report).unwrap_or_default(),
+                );
+                if report.verdict == CurationVerdict::Rejected {
+                    let issues_str = report
+                        .issues
+                        .iter()
+                        .map(|i| format!("{}: {}", i.invariant, i.message))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    return tool_err(format!("Curation gate rejected finding: {}", issues_str));
                 }
+                tool_ok(&report)
             }
-            Err(e) => tool_err(format!("Failed to build resolution node: {}", e)),
+            Err(e) => return tool_err(format!("Submit finding failed: {}", e)),
         }
     }
 }

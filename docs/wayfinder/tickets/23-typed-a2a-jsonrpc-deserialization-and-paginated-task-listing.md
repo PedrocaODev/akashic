@@ -4,9 +4,9 @@
 
 **Blocked by:** 22 — Composite Candidate Finding Schema, Checkpointed `rca_status`, and Persisted Curation Reports
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `tasks/list` pushes `LIMIT` and optional state/status filters to SQLite and batch-loads `candidate_findings` for the returned runs without scanning the full `workflow_runs` table or issuing per-run queries.
-- [ ] `tasks/get` includes both the **Investigation Context Packet** artifact and the persisted `CurationReport` artifact when a **Candidate Finding** has been evaluated for that task.
-- [ ] `tasks/get`, `tasks/cancel`, and `tasks/send` (`message/send`) deserialize JSON-RPC `params` into typed `serde` request structs (supporting `snake_case` and `camelCase` field aliases) rather than chaining manual `serde_json::Value::get` lookups.
-- [ ] Daemon A2A integration tests verify bounded `tasks/list` pagination, `CurationReport` artifact retrieval on `tasks/get`, and `camelCase` / `snake_case` request compatibility.
+- [x] `tasks/list` pushes `LIMIT` and optional state/status filters to SQLite and batch-loads `candidate_findings` for the returned runs without scanning the full `workflow_runs` table or issuing per-run queries.
+- [x] `tasks/get` includes both the **Investigation Context Packet** artifact and the persisted `CurationReport` artifact when a **Candidate Finding** has been evaluated for that task.
+- [x] `tasks/get`, `tasks/cancel`, and `tasks/send` (`message/send`) deserialize JSON-RPC `params` into typed `serde` request structs (supporting `snake_case` and `camelCase` field aliases) rather than chaining manual `serde_json::Value::get` lookups.
+- [x] Daemon A2A integration tests verify bounded `tasks/list` pagination, `CurationReport` artifact retrieval on `tasks/get`, and `camelCase` / `snake_case` request compatibility.

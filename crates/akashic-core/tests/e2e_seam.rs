@@ -1095,7 +1095,52 @@ Auth header: Bearer abcdef1234567890abcdef
     let lint_report = lint_vault(&vault_graph);
     assert_eq!(lint_report.error_count, 0, "Vault must have zero lint errors after crystallization");
 
-    // 8. Verify CLI argument parsing for curate, prepare-only, and daemon serve-a2a
+    // 8. Verify rca_status after rca_crystallize returns checkpoints and curation_report
+    let status_after_cryst = mcp_server
+        .rca_status(Parameters(akashic_core::mcp::RcaStatusParams {
+            investigation_id: "run-auth-202".to_string(),
+        }))
+        .await;
+    assert_eq!(status_after_cryst.is_error, Some(false));
+    let status_val_raw: serde_json::Value = serde_json::to_value(&status_after_cryst)?;
+    let status_text = status_val_raw["content"][0]["text"].as_str().unwrap();
+    let status_obj: serde_json::Value = serde_json::from_str(status_text)?;
+    let checkpoints = status_obj["checkpoints"]
+        .as_array()
+        .expect("checkpoints must be an array");
+    assert!(!checkpoints.is_empty(), "checkpoints array must be non-empty");
+    let curation_rep = &status_obj["curation_report"];
+    assert!(
+        curation_rep.is_object(),
+        "curation_report must be present as object"
+    );
+    let verdict_str = curation_rep["verdict"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert_eq!(
+        verdict_str, "approved",
+        "curation_report verdict must be approved"
+    );
+
+    // 9. Verify calling rca_crystallize with an unknown run_id returns isError: true without writing uncurated file
+    let unknown_params = akashic_core::mcp::RcaCrystallizeParams {
+        run_id: "unknown-run-999".to_string(),
+        summary: Some("Should fail immediately".to_string()),
+        ..Default::default()
+    };
+    let unk_res = mcp_server.rca_crystallize(Parameters(unknown_params)).await;
+    assert_eq!(
+        unk_res.is_error,
+        Some(true),
+        "rca_crystallize with unknown run_id must return error"
+    );
+    assert!(
+        !vault_dir.join("resolutions/RES-unknown-run-999.md").exists(),
+        "No uncurated RES note should be written"
+    );
+
+    // 10. Verify CLI argument parsing for curate, prepare-only, and daemon serve-a2a
     let cli_curate = Cli::try_parse_from(["akashic", "rca", "curate", "--run-id", "run-auth-202", "--candidate-id", "cand-alpha"])?;
     assert!(matches!(cli_curate.command, akashic_core::Commands::Rca { .. }));
 
@@ -1104,6 +1149,19 @@ Auth header: Bearer abcdef1234567890abcdef
 
     let cli_a2a = Cli::try_parse_from(["akashic", "daemon", "serve-a2a", "--bind", "127.0.0.1:9091"])?;
     assert!(matches!(cli_a2a.command, akashic_core::Commands::Daemon { .. }));
+
+    // Verify CLI crystallize fails when --finding-file is missing
+    let mut cmd_cryst = std::process::Command::new(env!("CARGO_BIN_EXE_akashic"));
+    cmd_cryst.current_dir(temp_dir);
+    cmd_cryst.args(["rca", "crystallize", "--run-id", "run-auth-202"]);
+    let out_cryst = cmd_cryst.output()?;
+    assert!(!out_cryst.status.success(), "CLI crystallize without finding-file must fail");
+    let err_msg = String::from_utf8_lossy(&out_cryst.stderr);
+    assert!(
+        err_msg.contains("--finding-file is required"),
+        "stderr should enforce --finding-file requirement: {}",
+        err_msg
+    );
 
     Ok(())
 }

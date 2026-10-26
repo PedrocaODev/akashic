@@ -4,12 +4,12 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] **Supersession** in the **Curation Gate** adds a forward `supersedes` **Relation** on the new **Resolution Node** and does not modify or overwrite the superseded **Resolution Node** file on disk.
-- [ ] Invariant `C004` runs `akashic-lint` (including configured custom field schema rules when a policy path is provided) and applies the validated **Plan** without rebuilding the in-memory **Vault Graph** a second time or passing a no-op validator closure.
-- [ ] `GerritEvent::ChangeMerged` updates the target **Resolution Node** through a validated **Plan** rather than writing directly to the filesystem before linting.
-- [ ] `rca_crystallize` and `akashic rca submit-finding` require every **Candidate Finding** to pass through the **Curation Gate** and remove legacy direct-write `RES-*` fallback paths.
-- [ ] Approved **Candidate Findings** record the `HypothesisFalsified` checkpoint in the **Local-Host Conductor** before transitioning to `Crystallized` or `Inconclusive`.
-- [ ] Newly crystallized `Incident`, `Evidence`, and `Resolution` **Vault Nodes** record the current UTC ISO-8601 date in `valid_from` rather than a hardcoded static date string.
-- [ ] `CurationIssue` uses a typed severity enum (`error` / `warning`), `C001` shares a single **Negative Knowledge** comparison helper across invalidated hypotheses and failed attempts, CLI `run` and `prepare` subcommands share one input builder, and `InvestigationContextPacket::resolved_symbol_ids` deduplicates stack frame symbols in $O(F)$ expected time using a hash set.
+- [x] **Supersession** in the **Curation Gate** adds a forward `supersedes` **Relation** on the new **Resolution Node** and does not modify or overwrite the superseded **Resolution Node** file on disk.
+- [x] Invariant `C004` runs `akashic-lint` (including configured custom field schema rules when a policy path is provided) and applies the validated **Plan** without rebuilding the in-memory **Vault Graph** a second time or passing a no-op validator closure.
+- [x] `GerritEvent::ChangeMerged` updates the target **Resolution Node** through a validated **Plan** rather than writing directly to the filesystem before linting.
+- [x] `rca_crystallize` and `akashic rca submit-finding` require every **Candidate Finding** to pass through the **Curation Gate** and remove legacy direct-write `RES-*` fallback paths.
+- [x] Approved **Candidate Findings** record the `HypothesisFalsified` checkpoint in the **Local-Host Conductor** before transitioning to `Crystallized` or `Inconclusive`.
+- [x] Newly crystallized `Incident`, `Evidence`, and `Resolution` **Vault Nodes** record the current UTC ISO-8601 date in `valid_from` rather than a hardcoded static date string.
+- [x] `CurationIssue` uses a typed severity enum (`error` / `warning`), `C001` shares a single **Negative Knowledge** comparison helper across invalidated hypotheses and failed attempts, CLI `run` and `prepare` subcommands share one input builder, and `InvestigationContextPacket::resolved_symbol_ids` deduplicates stack frame symbols in $O(F)$ expected time using a hash set.

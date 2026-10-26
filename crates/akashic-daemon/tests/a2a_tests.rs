@@ -225,6 +225,54 @@ java.lang.NullPointerException: Attempt to invoke virtual method on a null objec
         .collect();
     assert!(!res_files.is_empty());
 
+    // Verify tasks/get reconstructs persisted CurationReport and artifacts
+    let get_curated_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 51,
+        "method": "tasks/get",
+        "params": {
+            "id": run_id
+        }
+    });
+
+    let get_curated_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&get_curated_rpc)
+        .send()
+        .await
+        .unwrap();
+
+    let get_curated_val: serde_json::Value = get_curated_resp.json().await.unwrap();
+    let get_curated_task: A2aTask = serde_json::from_value(get_curated_val["result"].clone()).unwrap();
+    assert!(get_curated_task.curation_report.is_some());
+    assert!(get_curated_task
+        .artifacts
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|a| a.id.ends_with("-curation-report")));
+
+    // Test tasks/list with "limit": 1 and verify tasks_list.len() == 1
+    let list_limited_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 52,
+        "method": "tasks/list",
+        "params": {
+            "limit": 1
+        }
+    });
+
+    let list_limited_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&list_limited_rpc)
+        .send()
+        .await
+        .unwrap();
+
+    let list_limited_val: serde_json::Value = list_limited_resp.json().await.unwrap();
+    let limited_list: Vec<A2aTask> = serde_json::from_value(list_limited_val["result"].clone()).unwrap();
+    assert_eq!(limited_list.len(), 1);
+
     // 7. POST /a2a: tasks/cancel on another task
     let cancel_trigger_rpc = serde_json::json!({
         "jsonrpc": "2.0",
@@ -265,4 +313,126 @@ java.lang.NullPointerException: Attempt to invoke virtual method on a null objec
     let cancel_val: serde_json::Value = cancel_resp.json().await.unwrap();
     let cancelled_task: A2aTask = serde_json::from_value(cancel_val["result"].clone()).unwrap();
     assert_eq!(cancelled_task.state, A2aTaskState::Canceled);
+}
+
+#[tokio::test]
+async fn test_a2a_typed_params_compat_and_edge_cases() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("rca_state.db");
+    let vault_path = temp.path().join("vault");
+    fs::create_dir_all(vault_path.join("incidents")).unwrap();
+    fs::create_dir_all(vault_path.join("evidence")).unwrap();
+    fs::create_dir_all(vault_path.join("resolutions")).unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+
+    let config = A2aServerConfig {
+        bind_addr: local_addr.to_string(),
+        db_path,
+        vault_path: vault_path.clone(),
+        graph_store: None,
+        policy_path: None,
+    };
+
+    let server = Arc::new(A2aServer::new(config).unwrap());
+    let server_clone = Arc::clone(&server);
+
+    tokio::spawn(async move {
+        server_clone.serve(listener).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", local_addr);
+
+    // 1. tasks/send with camelCase keys
+    let send_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 100,
+        "method": "tasks/send",
+        "params": {
+            "jiraKey": "INC-CAMEL-1",
+            "appId": "com.motorola.camera",
+            "androidVersion": "15",
+            "rawLogs": "FATAL EXCEPTION: test logs\nNullPointerException",
+            "taskId": "run-camel-1"
+        }
+    });
+
+    let send_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&send_rpc)
+        .send()
+        .await
+        .unwrap();
+
+    let send_val: serde_json::Value = send_resp.json().await.unwrap();
+    assert_eq!(send_val["id"], 100);
+    let task: A2aTask = serde_json::from_value(send_val["result"].clone()).unwrap();
+    assert_eq!(task.id, "run-camel-1");
+    assert_eq!(task.state, A2aTaskState::InputRequired);
+
+    // 2. tasks/get with bare string params
+    let get_bare_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "tasks/get",
+        "params": "run-camel-1"
+    });
+    let get_bare_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&get_bare_rpc)
+        .send()
+        .await
+        .unwrap();
+    let get_bare_val: serde_json::Value = get_bare_resp.json().await.unwrap();
+    assert_eq!(get_bare_val["result"]["id"], "run-camel-1");
+
+    // 3. tasks/get with taskId alias
+    let get_alias_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 102,
+        "method": "tasks/get",
+        "params": { "taskId": "run-camel-1" }
+    });
+    let get_alias_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&get_alias_rpc)
+        .send()
+        .await
+        .unwrap();
+    let get_alias_val: serde_json::Value = get_alias_resp.json().await.unwrap();
+    assert_eq!(get_alias_val["result"]["id"], "run-camel-1");
+
+    // 4. tasks/get with missing id -> returns -32602
+    let get_err_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 103,
+        "method": "tasks/get",
+        "params": {}
+    });
+    let get_err_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&get_err_rpc)
+        .send()
+        .await
+        .unwrap();
+    let get_err_val: serde_json::Value = get_err_resp.json().await.unwrap();
+    assert_eq!(get_err_val["error"]["code"], -32602);
+
+    // 5. tasks/cancel with bare string params
+    let cancel_bare_rpc = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 104,
+        "method": "tasks/cancel",
+        "params": "run-camel-1"
+    });
+    let cancel_bare_resp = client
+        .post(format!("{}/a2a", base_url))
+        .json(&cancel_bare_rpc)
+        .send()
+        .await
+        .unwrap();
+    let cancel_bare_val: serde_json::Value = cancel_bare_resp.json().await.unwrap();
+    assert_eq!(cancel_bare_val["result"]["state"], "canceled");
 }

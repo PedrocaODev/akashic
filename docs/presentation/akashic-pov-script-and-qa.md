@@ -10,7 +10,10 @@
   - **Camera3 RCA and Supersession DAG (Synthetic Reference Architecture / PoC Simulation)**: Located in `prototype-akashic-rca-vault`. An illustrative test harness to validate Open Knowledge Format (OKF) v0.2 L001-L011 schema lints and forward supersession DAG resolution before production repository vaults are bootstrapped.
 - **Core Operational Contract**:
   - **Day-0 Value (Zero Team Setup)**: Akashic maps the as-is architecture across multiple OEM Android repositories out of the box. Powers the **Complexity and Blast Radius** axis of Code Review and code-level RCA (symbolication, soak storm deduplication gate, call-graph traversal).
-  - **Day-1 Organizational Prerequisite (Team Curation)**: To unlock the **Spec** and **Standards** axes of Code Review, and **Current Guidance / Negative Knowledge** in RCA, domain teams curate and commit authoritative Specs, Business Rules, Coding Standards, and Architecture Decision Records (ADRs) into their repository Vault. Confluence and Jira MCPs assist in drafting candidate documents via `akashic vault plan`, but domain teams own and verify what enters the repository Vault.
+  - **Day-1 Organizational Prerequisite (Team Curation)**: To unlock the **Spec** and **Standards** axes of Code Review, and **Current Guidance / Negative Knowledge** in RCA, domain teams curate and commit authoritative Specs, Business Rules, Coding Standards, and Architecture Decision Records (ADRs) into their repository Vault. Confluence and Jira MCPs assist in drafting candidate documents via `akashic vault plan`, but domain teams own and verify what enters the repository Vault. For repositories already using the OSS Gemini CLI `conductor/` agentic development guideline (such as `SampleRadio/conductor/`), existing `conductor/code_styleguides/`, `tech-stack.md`, `product.md`, and `conductor/tracks/<id>/spec.md` bootstrap Axis 1 (Standards) and Axis 2 (Spec) directly via `akashic vault plan` with zero workflow disruption.
+- **Zero-Friction OSS Conductor Interoperability**:
+  - **Repo-Level Gemini CLI `conductor/` Coexistence**: Repositories following the OSS Conductor track guideline (e.g., `SampleRadio/conductor/`) keep their daily developer workflow, `workflow.md`, `tracks.md`, and TDD `plan.md` (`[ ] -> [~] -> [x]`) completely intact. Akashic augments flat markdown tracks by supplying AST blast radius during phase audits and converting completed track specs into governed OKF v0.2 Vault nodes with forward-only `supersedes` lineage.
+  - **Distributed `conductor-oss/conductor` (`agentspan`) Boundary ([ADR 0008](file:///home/pedrogoncalves/projects/akashic/docs/adr/0008-Local-Host-RCA-Conductor-And-Soak-Storm-Deduplication.md))**: High-frequency interactive coding and pre-LLM crash deduplication remain host-native over `stdio` MCP and embedded SQLite WAL (`rca_state.db`) to eliminate `DeciderService` queue polling and 5-task `agentspan` GraalJS compilation tax. Outer-loop enterprise sagas (multi-day compliance gates, fleet soak triggers, cross-service provisioning) invoke `akashic` CLI/MCP as a deterministic, native worker task.
 - **Rollout Model**: Two operational tiers:
   - **Tier 1 (Workstation-Local Toolchain - Evaluated Today)**: Local CLI and native `rmcp` Model Context Protocol (MCP) server running directly on developer and triage workstations with zero centralized server infrastructure. Local SQLite WAL ensures sub-millisecond query latency.
   - **Tier 2 (Centralized Gerrit Stream Automation - Architecture Ready)**: Dedicated build runner running `akashic daemon`, connected to `gerrit.example.com:29418`. Features a 30-second sliding debounce (300-second maximum cap), watermark catch-up after disconnects, and a Structural Significance Filter to ignore cosmetic changes.
@@ -26,11 +29,11 @@
   - `Layer 3: OEM Engineering Sources (Bare Git .git/objects + OKF v0.2 Vault + Gerrit 29418)`
 - **Presenter Cue**: Set an objective engineering tone. Frame Akashic as the missing context substrate for Google enterprise AI (Gemini Code Assist).
 - **Spoken Track**:
-  > "Good morning. We were tasked with deploying two high-leverage AI workflows: 3-Axis Code Review and Automated Root Cause Analysis.
-  > While building and testing those workflows against ExampleOEM OEM Android repositories, we identified a fundamental bottleneck: the model and the prompt are not the constraint. Context retrieval is the constraint.
-  > For Code Review, an autonomous agent requires three distinct axes: **Standards**, **Spec**, and **Complexity**. For RCA, an agent requires stack trace symbolication, call-graph blast radius, and historical context regarding prior incidents and failed workarounds.
-  > Off-the-shelf retrieval tools fail at OEM scale for two specific reasons:
-  > First, LLM-based indexers (such as Python `graphify`) invoke cloud models during indexing. On repositories with millions of lines of code, this burns tokens, runs slowly, and generates non-deterministic graphs across runs.
+  > "Good morning. We were tasked with deploying two high-leverage AI workflows: Code Review and Root Cause Analysis.
+  > While building and testing those workflows against our codebase, we identified a fundamental bottleneck: models and prompts are not the constraint. Context retrieval is.
+  > For Code Review, an autonomous agent requires three distinct axes: **Standards**, **Spec**, and **Complexity**. Meanwhile for RCA, an agent requires stack trace symbolication, call-graph blast radius, and historical context regarding prior incidents and failed workarounds.
+  > Off-the-shelf retrieval tools fail scale for two specific reasons:
+  > First, LLM-based indexers (such as `graphify`) invoke models during indexing. On repositories with millions of lines of code, this burns tokens, runs slowly, and generates non-deterministic graphs across runs.
   > Second, querying raw Confluence or Jira MCPs at runtime retrieves outdated 2023 design pages alongside 2025 specs with identical cosine similarity. Because raw wikis lack typed scope and temporal supersession links, the LLM blends obsolete rules with current rules and hallucinates review findings or broken fixes.
   > We built **Akashic** to solve this. Akashic is a single, host-native Rust binary and MCP server that integrates a deterministic **Code Graph**, a governed Markdown **Vault**, and a checkpointed **Local-Host RCA Conductor**."
 
@@ -52,7 +55,7 @@
 - **Presenter Cue**: Contrast Day-0 zero-setup discovery with Day-1 team curation. Emphasize that all numbers shown are verified production facts.
 - **Spoken Track**:
   > "Let us distinguish what Akashic delivers on **Day 0 with zero team setup** from what requires **Day 1 team curation**.
-  > On Day 0, Akashic maps the as-is architecture across our OEM Android applications out of the box. We indexed four ExampleOEM applications: **SampleRecorder**, **SampleAssist**, **SampleAudioUI**, and **SampleRadio**.
+  > On Day 0, Akashic maps the as-is architecture across our OEM Android applications out of the box. We indexed four ExampleOEM applications: **SampleRecorder**, **SampleAssist**, **SampleAudioUI**, and **SampleRadio** (which already uses the OSS Gemini CLI `conductor/` setup; Akashic indexes its 54 package mappings and 2,434 symbols via bare `gix` alongside `conductor/` with zero friction).
   > Our `Clone-to-Onboard Discovery` algorithm executes a deterministic 5-pass parser across `settings.gradle`, module `build.gradle` files, and `AndroidManifest.xml` ([ADR 0009](file:///home/pedrogoncalves/projects/akashic/docs/adr/0009-Gerrit-Stream-Adaptive-Debounce-Watermark-Catchup-And-Auto-Discovery.md), [01-android-package-autodiscovery.md](file:///home/pedrogoncalves/projects/akashic/docs/wayfinder/research/01-android-package-autodiscovery.md)). It maps `applicationId`, `namespace`, and manifest package declarations directly to local repositories, Gerrit project branches, and Vault partitions.
   > Across these four applications, Akashic automatically mapped **810 package declarations**, extracted **20,231 code symbols**, and identified **143,260 edges** (including 91,077 extracted AST calls and inheritance links, plus 52,183 inferred similarity edges), requiring **zero LLM indexing calls** ([ADR 0005](file:///home/pedrogoncalves/projects/akashic/docs/adr/0005-Use-Deterministic-AST-And-Embedding-Sidecar-Instead-Of-LLM-Indexing.md)).
   > Ingestion uses `gix` to read Git blobs directly from `.git/objects` into memory ([ADR 0006](file:///home/pedrogoncalves/projects/akashic/docs/adr/0006-Non-Destructive-Git-Ingestion-And-Structural-Significance-Filtering.md)). It never touches the developer's working tree, never alters file timestamps, and never invalidates Gradle incremental build caches.
@@ -87,8 +90,8 @@
   - `Day-0: Code Graph Only`
   - `Raw Confluence / Jira MCP`
   - `Day-1: Curated Vault + Graph`
-  - Highlighted callout: Bootstrap & Ownership Contract.
-- **Presenter Cue**: Explain why structural analysis alone cannot verify engineering intent. Address why raw Confluence/Jira search fails.
+  - Highlighted callout: Sources of Truth & Bootstrap Contract (noting ExampleOEM's PRD platform as the most reliable source of truth for specs).
+- **Presenter Cue**: Explain why structural analysis alone cannot verify engineering intent. Address why raw Confluence/Jira search fails, highlight ExampleOEM's PRD platform as the most reliable source of truth for specs, and mention how existing OSS `conductor/` artifacts in repos like `SampleRadio` seed Axis 1 and Axis 2 directly (and signpost Appendix E / Slide 12 for deep dive).
 - **Spoken Track**:
   > "This brings us to the core technical finding of our evaluation: **code structure alone reveals what code is, but it cannot determine what code was intended to do.**
   > Consider our 3-Axis Code Review workflow:
@@ -97,7 +100,8 @@
   > - Axis 2 (**Spec Compliance**) must skip entirely if there is no authoritative specification to evaluate the diff against.
   > A natural question arises: *'We have Confluence and Jira MCPs. Why not allow the agent to query Confluence and Jira directly during review or RCA?'*
   > Because raw Confluence pages and Jira tickets are uncurated text. A vector search over Confluence returns an obsolete 2023 architecture proposal alongside a 2025 production specification with similar cosine scores. Because neither document has a typed scope or supersession link, the agent blends contradictory rules and hallucinates.
-  > We can use `confluence-mcp` and `jira-mcp` to draft candidate specifications via `akashic vault plan`, **but domain engineering teams must verify, curate, and commit their authoritative Specs, Standards, and ADRs into their repository Vault.**"
+  > Instead, we establish a clear hierarchy of upstream sources of truth: **ExampleOEM's PRD platform is considered the most reliable source of truth for product and feature specifications.** We use ExampleOEM's PRD platform as our primary spec source alongside `confluence-mcp` and `jira-mcp` to draft candidate specifications via `akashic vault plan`, **and domain engineering teams verify, curate, and commit their authoritative Specs, Standards, and ADRs into their repository Vault.**
+  > Crucially, for repositories that already follow the **OSS Gemini CLI `conductor/` guideline**—such as `SampleRadio` with its `conductor/code_styleguides/`, `tech-stack.md`, `product.md`, and `tracks/<id>/spec.md`—teams do not start from scratch or change their workflow. Akashic ingests their existing `conductor/` standards and active track specs directly into Axis 1 and Axis 2. When a track completes, `akashic vault plan` promotes the spec into the Vault with OKF v0.2 `supersedes` links, ensuring completed historical tracks never conflict with newer ones. We will dive deeper into this zero-friction coexistence in Appendix E (Slide 12)."
 
 ### Slide 6: Act 3 (Day-1 Full Power): Governed Vault & Lineage (13:30 - 16:00)
 - **Visual on Deck**: Prominent amber badge `SYNTHETIC REFERENCE ARCHITECTURE // PoC SCENARIO`, the Camera3 RCA DAG diagram (`incident-cam-9102`, `evidence-cam-stack`, `decision-buffer-opt`, `decision-revert-cl-489201`), OKF frontmatter YAML snippet, and the Data Provenance Notice callout box.
@@ -119,12 +123,12 @@
   > - **Operational Tier 2 (Centralized Gerrit Stream Automation - Architecture Ready)**: For automated pre-merge gating, `akashic daemon` runs on dedicated build infrastructure connected to `gerrit.example.com:29418` ([ADR 0009](file:///home/pedrogoncalves/projects/akashic/docs/adr/0009-Gerrit-Stream-Adaptive-Debounce-Watermark-Catchup-And-Auto-Discovery.md)). The daemon includes a 30-second sliding debounce (300-second maximum cap), persistent high-watermarks for stream reconnection, and a `Structural Significance Filter` that ignores private method formatting changes ([ADR 0006](file:///home/pedrogoncalves/projects/akashic/docs/adr/0006-Non-Destructive-Git-Ingestion-And-Structural-Significance-Filtering.md)).
   > **Key Engineering Findings**:
   > - **Platform Engineering**: Akashic builds as a single static Rust binary with zero external runtime dependencies (free of JVM or Python runtimes). Its 3-DB physical WAL architecture prevents write lock starvation during concurrent agent reads, and Tier-4 sanitization enforces PII redaction at compile time.
-  > - **Android OEM Engineering**: The 5-pass discovery algorithm accurately indexes complex multi-module Android projects. Reading bare Git objects via `gix` guarantees that background code indexing never invalidates local Gradle build caches.
-  > We will now move into Q&A. We have detailed technical battlecards and reference slides prepared across platform architecture, sanitization, Android build safety, and hallucination defense."
+  > - **Android OEM Engineering**: The 5-pass discovery algorithm accurately indexes complex multi-module Android projects. Reading bare Git objects via `gix` guarantees that background code indexing never invalidates local Gradle build caches. Furthermore, Akashic achieves zero-friction coexistence with existing OSS `conductor/` repository setups (`SampleRadio/conductor/`) and cleanly interfaces with outer-loop `conductor-oss` enterprise pipelines.
+  > We will now move into Q&A. We have detailed technical battlecards and reference slides prepared across platform architecture, sanitization, Android build safety, hallucination defense, and zero-friction coexistence with OSS Conductor setups."
 
 ---
 
-## 3. Spoken Tracks and Presenter Cues for Appendix Slides (8 - 11)
+## 3. Spoken Tracks and Presenter Cues for Appendix Slides (8 - 12)
 
 These slides are linked directly to specific Principal Engineer Q&A topics. Use keyboard hotkeys to navigate to them instantly during the discussion.
 
@@ -179,14 +183,69 @@ These slides are linked directly to specific Principal Engineer Q&A topics. Use 
   > 4. **Adversarial Falsification**: During Stage 5 of RCA, a secondary check actively attempts to disprove candidate root causes against symbolicated frames and Git diffs.
   > For team curation, we follow a 3-step flywheel: Day 0 requires zero documentation. In Step 2, Confluence and Jira MCPs draft candidate nodes via `akashic vault plan`. In Step 3, the team signs off and commits authoritative specs, after which resolved RCA postmortems maintain the vault continuously."
 
+### Slide 12 (Appendix E - Hotkey `=` / `E`): Zero-Friction OSS Conductor Interoperability (Q9 Battlecard)
+- **Visual on Deck**: Split comparison layout with two deep-dive columns:
+  - **Left Column (`col-54: Repo-Level Gemini CLI conductor/ Coexistence`)**:
+    - Descriptive header: `1. Repo-Level Gemini CLI conductor/ Coexistence (SampleRadio/conductor/)`.
+    - Context subtitle explaining how teams preserve `workflow.md`, `tracks.md`, and TDD `plan.md` (`[ ] -> [~] -> [x]`).
+    - 4-row artifact mapping table (`.table-matrix`):
+      1. `code_styleguides/` & `tech-stack.md` -> Seeds **Axis 1 (Standards)** & `akashic/<app>/standards/` via `vault plan`.
+      2. `tracks/<id>/spec.md` & `product.md` -> Drives **Axis 2 (Spec)**; promotes to OKF v0.2 with `supersedes` DAG on checkpoint.
+      3. `workflow.md` (Audit & Phase Gate) -> Injects **Axis 3 (Complexity)** via `akashic_blast_radius` (0 Gradle cache impact).
+      4. `tracks/<id>/plan.md` & `tracks.md` -> Remains active developer task checklist; zero duplicate tracking required.
+    - Green callout box (`Why Both Together Win` / `Zero Workflow Disruption on SampleRadio/conductor/`): `conductor/` structures active feature execution; Akashic prevents completed historical tracks from conflicting via OKF v0.2 `Current Guidance` and deterministic AST call graphs.
+  - **Right Column (`col-46: Distributed conductor-oss / agentspan Boundary - ADR 0008`)**:
+    - Section header: `2. Distributed conductor-oss (agentspan) Boundary (ADR 0008)`.
+    - Inline SVG architecture diagram (740x310 viewBox) showing the clean boundary:
+      - **OUTER LOOP (Top Box)**: Distributed Conductor OSS (`DeciderService` / `QueueDAO`, `SystemTaskWorker Poller`, `akashic CLI` worker task) for unattended enterprise sagas, fleet soak triggers, and asynchronous `HUMAN` / `WAIT` compliance gates.
+      - **Stateless / Checkpointed Worker Call** vertical arrow link.
+      - **INNER LOOP (Bottom Green Box)**: Host-Native Akashic + Repo `conductor/` (`rmcp stdio MCP`, 3x SQLite WAL `.akashic/`, 0 JVM / 0 Queue Tax) for sub-ms interactive coding, 3-Axis Review, and local-host RCA.
+    - Architectural breakdown bullets (`card-text`):
+      - **Why Inner-Loop Stays Native (No Inner-Loop Polling Tax)**: In `conductor-oss` (`agentspan`), 1 tool turn compiles into 5+ GraalJS/Fork tasks with lock contention. Keeping interactive coding & crash deduplication in local Rust preserves sub-ms speed.
+      - **Clean Integration Boundary (Drop-In Outer Worker)**: Distributed Conductor OSS workflows invoke the single static `akashic` binary for headless CI gates and post-merge RCA.
+    - Indigo callout box (`Architectural Takeaway (ADR 0008)`): Local host RCA & active coding run at native Rust speeds; distributed Conductor OSS orchestrates long-running, multi-service lifecycle sagas.
+- **Presenter Cue**: Use when asked how Akashic works with existing OSS Conductor guidelines used in projects like `SampleRadio` or distributed `conductor-oss` orchestration pipelines. Point first to the table on the left, then walk through the outer/inner loop boxes in the SVG on the right.
+- **Spoken Track**:
+  > *(Press hotkey `=` or `E`)*
+  > "Slide 12 directly answers Q9 from both the Android engineering and platform orchestration perspectives: how does Akashic coexist with existing OSS Conductor workflows?
+  > Look first at the **left column**, which addresses repository-level adoption.
+  > Several ExampleOEM Android teams, including `SampleRadio`, already follow the **Gemini CLI `conductor/` Context-Driven Development setup**.
+  > Feature developers in `SampleRadio` use `conductor/` commands to create track branches, maintain active checklists in `plan.md` (`[ ] -> [~] -> [x]`), run TDD red-green-refactor cycles, and record phase checkpoint SHAs.
+  > Akashic introduces **zero workflow disruption**:
+  > - Look at rows 1 and 2 of the table: Akashic ingests `conductor/code_styleguides/` and `tech-stack.md` to seed **Axis 1 (Coding Standards)**, and uses `conductor/tracks/<id>/spec.md` to feed **Axis 2 (Spec Compliance)**.
+  > - Crucially, when a track reaches completion, `akashic vault plan` promotes the spec into the repository Vault as an OKF v0.2 node with forward-only `supersedes` links. This solves a notorious pain point in `conductor/`: as dozens of completed tracks accumulate over months, flat markdown files begin conflicting. Akashic’s Vault resolves this with deterministic DAG precedence.
+  > - In row 3, during `conductor`'s Phase 1 Audit and Phase Verification gates, `akashic_blast_radius` injects **Axis 3 (Complexity)** into the agent's context, traversing call graphs without touching Gradle caches.
+  > Now look at the **right column**, which addresses distributed orchestration for platform engineering ([ADR 0008](file:///home/pedrogoncalves/projects/akashic/docs/adr/0008-Local-Host-RCA-Conductor-And-Soak-Storm-Deduplication.md)).
+  > Some teams evaluate distributed Conductor OSS (`conductor-oss/conductor` with `agentspan`).
+  > In `conductor-oss`, the `agentspan` engine compiles every single LLM tool turn into 5 or more dynamic system tasks (`DO_WHILE`, `SWITCH`, `INLINE` GraalJS, `FORK_JOIN_DYNAMIC`, `JOIN`), gated by `ExecutionLockService` and queue polling.
+  > Running interactive coding or monkey soak crash deduplication through distributed queues adds prohibitive multi-second latency and JVM overhead.
+  > As the SVG diagram illustrates, Akashic establishes a clean **Inner-Loop vs. Outer-Loop boundary**:
+  > - The **Inner Loop** (bottom green box) stays host-native: interactive coding, 3-Axis code review, pre-LLM soak storm deduplication, and local RCA execute over `stdio` MCP and embedded SQLite WAL with zero JVM and zero queue polling tax.
+  > - The **Outer Loop** (top box) runs in Conductor OSS: long-running enterprise sagas, fleet soak orchestrations, and multi-day `HUMAN`/`WAIT` compliance approvals invoke `akashic` CLI as a deterministic, zero-dependency native worker task."
+
 ---
 
 ## 4. Interactive Console & Demo Execution Guide
 
 The presentation deck on Slide 4 includes an interactive terminal console. This console replaces static screenshots and video players with high-fidelity CLI output captured directly from the toolchain.
 
-### Console Navigation Hotkeys
+### Deck & Battlecard Navigation Hotkeys
 When presenting [`akashic-pov-deck.html`](file:///home/pedrogoncalves/projects/akashic/docs/presentation/akashic-pov-deck.html) in any modern browser:
+
+| Key / Shortcut | Target / Action | Context & Description |
+|---|---|---|
+| `Space` / `→` | Next Slide | Advance one slide forward through the presentation |
+| `←` | Previous Slide | Return to previous slide |
+| `1` – `7` | Main Slides (1 - 7) | Jump directly to Core Deck slides (1: Thesis, 2: Architecture, 3: Day-0 Value, 4: Live Demo, 5: Intent Gap, 6: Governed Vault, 7: Rollout) |
+| `1` – `3` (on Slide 4) | Demo Console Chapters | Switch active chapter tab in the terminal console (1: Discovery & Scale, 2: Blast Radius, 3: Camera3 RCA) |
+| `8` / `A` | Slide 8 (Appendix A) | Consolidated Rust Engine & Native Agent MCP Server |
+| `9` | Slide 9 (Appendix B) | Mandatory Tier-4 Sanitization & PII Redaction (Q4 Battlecard) |
+| `0` | Slide 10 (Appendix C) | Android PE Battlecard: Module Discovery, Gradle Cache Safety & Soak Deduplication (Q5-Q7) |
+| `-` | Slide 11 (Appendix D) | Four-Layer Hallucination Defense & Curation Flywheel (Q2 & Q8) |
+| `=` / `E` | Slide 12 (Appendix E) | Zero-Friction OSS Conductor Interoperability: Repo-Level & Outer-Loop Boundaries (Q9) |
+| `F` | Toggle Fullscreen | Expand presentation stage to full display resolution (1920x1080 fixed aspect ratio) |
+
+### Console Navigation Hotkeys
 - Press **`4`** to navigate to Slide 4.
 - While on Slide 4, press **`1`**, **`2`**, or **`3`** to switch between console chapters instantly.
 - Alternatively, click the chapter buttons in the left column.
@@ -291,5 +350,25 @@ cd /home/pedrogoncalves/projects/akashic
 - **Linked Slide**: Slide 5 (Hotkey `5`) and Slide 11 (Appendix D - Hotkey `-`).
 - **Direct Answer**:
   - **Zero documentation is required on Day 0**: Teams immediately receive multi-repo Code Graph navigation, blast radius analysis, Complexity pre-review checks, and code-level RCA symbolication out of the box.
-  - **Confluence and Jira MCPs assist in bootstrapping**: We query existing Confluence pages and Jira tickets via MCP tools, running `akashic vault plan` to generate draft OKF Markdown nodes automatically.
+  - **ExampleOEM's PRD platform, Confluence, and Jira assist in bootstrapping**: ExampleOEM's PRD platform serves as the most reliable source of truth for specifications. We ingest specs from ExampleOEM's PRD platform alongside Confluence pages (`confluence-mcp`) and Jira tickets (`jira-mcp`), running `akashic vault plan` to generate draft OKF Markdown nodes automatically.
   - **Human curation is essential for authority**: An algorithm cannot deduce which of three conflicting Confluence pages reflects the team's true business intent. Domain teams only need to review and commit the authoritative specifications, coding standards, and ADRs via `akashic vault apply` and `akashic lint`. Once committed, RCA resolutions and supersessions update the Vault incrementally during standard engineering workflows.
+
+#### Q9: "Several projects (such as `SampleRadio`) already follow the OSS Conductor setup (`conductor/` tracks and guidelines), and platform teams also evaluate Conductor OSS (`conductor-oss/conductor`). Will Akashic create friction or require migrating away from Conductor?"
+- **Linked Slide**: Slide 12 (Appendix E - Hotkey `=` or `E`).
+- **Direct Answer**:
+  
+  ##### Perspective 1: Android Principal Engineer (Repo-Level Gemini CLI Conductor)
+  - **Zero workflow friction or migration**: Teams continue using `/conductor:newTrack`, `/conductor:implement`, and `/conductor:review`. The existing `conductor/workflow.md` lifecycle—`plan.md` task checklists (`[ ] -> [~] -> [x]`), strict TDD red-green-refactor cycles, phase checkpoint Git SHAs, and user-gated commits—remains authoritative and untouched.
+  - **Supercharging Conductor across the 3 Code Review Axes**:
+    - **Axis 1 (Standards)**: Static markdown rules in `conductor/code_styleguides/*.md` and `conductor/tech-stack.md` automatically seed `akashic/<app_id>/standards/` via `akashic vault plan`.
+    - **Axis 2 (Spec Compliance & Temporal Lineage)**: Active `conductor/tracks/<track_id>/spec.md` files provide requirements context during coding. Upon track completion, `akashic vault plan` promotes the spec into governed OKF v0.2 Vault nodes (`akashic lint` -> `akashic vault apply`). Crucially, Akashic introduces `supersedes` DAG links, preventing stale markdown track context from lingering and poisoning future agent sessions.
+    - **Axis 3 (Complexity & Blast Radius)**: During `/conductor:review` and the Phase Completion Verification Protocol, agents call `akashic_blast_radius` and `akashic_graph_query` against `.akashic/code_graph.db`. This pinpoints transitive blast radius across Android Gradle submodules (e.g., `:SamplePlayer` to `:common-ipc` AIDL interfaces) directly from in-memory git object buffers without touching working tree files or invalidating Gradle incremental build caches.
+
+  ##### Perspective 2: Platform Principal Engineer (Distributed Conductor OSS & AgentSpan)
+  - **Clean Architectural Boundary ([ADR 0008](file:///home/pedrogoncalves/projects/akashic/docs/adr/0008-Local-Host-RCA-Conductor-And-Soak-Storm-Deduplication.md))**: Conductor OSS (`conductor-oss/conductor`) and Akashic operate at complementary architectural tiers rather than competing for the same runtime loop.
+  - **Why Inner-Loop Tooling Avoids Distributed Queue Latency**: Auditing `conductor-oss` (`DeciderService`, `WorkflowExecutorOps`, `ExecutionLockService`, `QueueDAO`, and `agentspan`'s `AgentCompiler`/`ToolCompiler`) demonstrates that compiling each LLM tool call into 5+ dynamic system tasks (`DO_WHILE`, `SWITCH`, `INLINE` GraalJS, `FORK_JOIN_DYNAMIC`, `JOIN`) backed by distributed queue polling introduces prohibitive multi-second scheduling latency and JVM memory tax.
+  - **Inner-Loop vs. Outer-Loop Separation**:
+    - **Inner Loop (Host-Native)**: Akashic handles interactive developer turns, 3-Axis code review gates, pre-LLM soak storm deduplication, and local RCA symbolication via `stdio` MCP and embedded SQLite WAL (`code_graph.db`, `rca_state.db`). It runs sub-second with zero JVM, zero network hops, and zero queue contention.
+    - **Outer Loop (Enterprise Sagas)**: Conductor OSS orchestrates distributed enterprise workflows—unattended nightly fleet regressions, multi-device soak test campaigns, and multi-day `HUMAN`/`WAIT` compliance approvals. Distributed Conductor workers invoke `akashic rca`, `akashic lint`, and `akashic graph` as fast, deterministic, zero-dependency CLI worker tasks.
+
+

@@ -26,3 +26,6 @@ rustc-ice-*.txt
 *.db
 .scratch/
 .akashic/
+node_modules/
+package-lock.json
+package.json

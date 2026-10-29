@@ -48,8 +48,8 @@
 * **Core Data Points**:
   1. Code structure reveals what the code is, but verifying intent requires versioned, conflict-free rules.
   2. Day-0 Graph gives you structure. Raw RAG gives you noise. Day-1 Vault + Graph gives you governance.
-  3. Bootstrap Contract: Domain teams must curate, verify, and commit authoritative specs into their repo Vault.
-* **Speaker Notes**: Code tells you what the machine is doing, but not what the business wanted. If an LLM reads Confluence directly, it might grab a deprecated 2023 design doc. The Vault forces the team to commit their intent alongside the code.
+  3. Sources of Truth & Bootstrap Contract: ExampleOEM's PRD platform is the most reliable source of truth for specs. Upstream sources (ExampleOEM's PRD platform, repo `conductor/` tracks, `confluence-mcp`, and `jira-mcp`) draft candidate nodes via `akashic vault plan`, and domain teams verify and commit authoritative specs into their repo Vault.
+* **Speaker Notes**: Code tells you what the machine is doing, but not what the business wanted. If an LLM reads Confluence directly, it might grab a deprecated 2023 design doc. For specifications, ExampleOEM's PRD platform is considered the most reliable source of truth. By seeding candidate Vault nodes from ExampleOEM's PRD platform alongside Confluence, Jira, and repo `conductor/` tracks, the Vault commits verified intent alongside the code.
 
 ## Slide 6: ACT 3 - GOVERNED VAULT
 * **Timing**: 13:30 - 16:00
@@ -108,3 +108,14 @@
   1. 4-Layer Defense: Explicit Edge Provenance, Temporal Supersession, Strict Conflict Abstention, Adversarial Hypothesis Falsification.
   2. 3-Step Flywheel: Day-0 Graph -> AI-Assisted Bootstrap -> Team Sign-Off.
 * **Speaker Notes**: How do we trust it? By not letting the AI guess the architecture. The Code Graph provides explicit edges. If there is a conflict in the Vault, the system abstains and forces a human to resolve it via Lint rules. The AI is a synthesizer, not an oracle.
+
+## Slide 12: APPENDIX E (OSS CONDUCTOR INTEROPERABILITY)
+* **Timing**: 18:00 - 30:00
+* **Action Title**: Akashic Augments Repo-Level Conductor Tracks and Outer-Loop Conductor OSS Workflows with Zero Friction
+* **Layout Archetype**: `split-comparison`
+* **Core Data Points**:
+  1. Repo-Level Gemini CLI `conductor/` Coexistence (e.g., `SampleRadio/conductor/`): Zero migration friction. Teams keep `workflow.md`, `tracks.md`, and TDD `plan.md` (`[ ] -> [~] -> [x]`) intact.
+  2. Direct 3-Axis & Vault Mapping: `conductor/code_styleguides/` + `tech-stack.md` feed Axis 1 (Standards); `conductor/tracks/<id>/spec.md` + `product.md` feed Axis 2 (Spec Compliance) and promote to OKF v0.2 Vault nodes via `akashic vault plan` with forward-only `supersedes` lineage; `.akashic/code_graph.db` (`akashic_blast_radius`) powers Axis 3 (Complexity) during Phase 1 Audit and Phase Verification.
+  3. Distributed `conductor-oss/conductor` (`agentspan`) Boundary (ADR 0008): Inner-loop interactive coding and pre-LLM crash deduplication run locally via `akashic` (`stdio` MCP + `.akashic/rca_state.db`) to avoid `DeciderService` queue polling and 5-task `agentspan` GraalJS compilation per tool turn; outer-loop `conductor-oss` enterprise sagas invoke `akashic` as a deterministic native worker task.
+* **Speaker Notes**: Several ExampleOEM projects like SampleRadio already follow the OSS Conductor guideline for agentic development. Akashic introduces zero friction: teams keep their `conductor/` directory and TDD track workflow as-is, while Akashic adds the missing AST blast radius and supersession-aware Vault governance. And for teams running distributed Conductor OSS pipelines, Akashic cleanly separates the fast local inner loop from outer-loop enterprise sagas.
+

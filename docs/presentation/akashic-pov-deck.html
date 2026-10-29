@@ -185,6 +185,7 @@
             <option value="9">9. Appx B: Security</option>
             <option value="10">10. Appx C: Android</option>
             <option value="11">11. Appx D: Defense</option>
+            <option value="12">12. Appx E: Conductor</option>
           </select>
           <span style="color:var(--text-muted); font-size:14px; font-family:var(--font-mono);">Overview [O] Notes [N] Fullscreen [F]</span>
         </div>
@@ -375,8 +376,8 @@
               </div>
               <!-- Takeaways Card -->
               <div class="card" id="takeaways-card" style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
-                <div class="card-title" id="takeaways-title" style="margin-bottom: 12px;">Chapter 1 Highlights</div>
-                <div class="card-text" id="takeaways-content" style="font-size: 16px; line-height: 1.5;"></div>
+                <div class="card-title" id="takeaways-title" style="margin-bottom: 12px;">Chapter 1 Highlights (Act 1 Takeaway)</div>
+                <div class="card-text" id="takeaways-content" style="font-size: 16px; line-height: 1.5;"><strong>Day-0 Multi-Repo Discovery:</strong> 4 OEM Repositories, 810 Package Mappings, 20,231 Symbols, 91,077 AST Edges vs 52,183 Inferred Edges (0 LLM calls).<br><br><strong>Architectural God-Nodes:</strong> Instant hub detection in <code>SampleRecorder</code> (<code>logD</code>, <code>verify</code>, <code>run</code>, <code>TranscribeAudioAICore</code>).</div>
               </div>
             </div>
             <!-- Right Column (60%) -->
@@ -390,7 +391,28 @@
                   <div style="color: #888; font-family: var(--font-mono); font-size: 13px; margin-left: 12px;">akashic-cli v0.2.0 -- deterministic gate</div>
                 </div>
                 <!-- Terminal Content -->
-                <div class="code-block" id="terminal-content" style="flex: 1; border: none; border-radius: 0; background: #0a0a0a; margin: 0; font-size: 13px; line-height: 1.4; overflow-y: auto; white-space: pre-wrap;"></div>
+                <div class="code-block" id="terminal-content" style="flex: 1; border: none; border-radius: 0; background: #0a0a0a; margin: 0; font-size: 13px; line-height: 1.4; overflow-y: auto; white-space: pre-wrap;"><span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph discover --summary</span>
+Multi-Repo OEM Discovery (settings.gradle + AndroidManifest.xml 5-pass index):
+
+<span style="color:#00d8d6;">REPOSITORY</span>         | GERRIT PROJECT                   | PRIMARY APPLICATION ID (VAULT PARTITION)         |  <span style="color:#2ecc71;">PKGS</span> | <span style="color:#2ecc71;">SYMBOLS</span>
+--------------------------------------------------------------------------------------------------------------------------
+<span style="color:#00d8d6;">SampleRecorder</span>      | ...a/packages/apps/SampleRecorder | com.example.samplerecorder.recordingservice      |   <span style="color:#2ecc71;">180</span> |   <span style="color:#2ecc71;">9,792</span>
+<span style="color:#00d8d6;">SampleRadio</span>            | ...otorola/packages/apps/SampleRadio | com.example.radiosdktestapp                        |    <span style="color:#2ecc71;">54</span> |   <span style="color:#2ecc71;">2,434</span>
+<span style="color:#00d8d6;">SampleAssist</span>  | apps/SampleAssist           | com.example.assist                                |   <span style="color:#2ecc71;">488</span> |   <span style="color:#2ecc71;">4,857</span>
+<span style="color:#00d8d6;">SampleAudioUI</span>        | ...ola/packages/apps/SampleAudioUI | com.example.audioeffects                    |    <span style="color:#2ecc71;">88</span> |   <span style="color:#2ecc71;">3,148</span>
+==========================================================================================================================
+<span style="color:#ffbd2e;">TOTALS: 4 OEM Repositories | 810 Package Mappings | 20,231 Code Symbols</span>
+EDGE PROVENANCE: 143,260 Edges (91,077 EXTRACTED AST [calls/inherits] | 52,183 INFERRED [score &gt;= 0.82])
+
+<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph god-nodes --repo-name SampleRecorder --top-n 8</span>
+logD: in=2160, out=5, total=2165
+logW: in=836, out=3, total=839
+logI: in=513, out=1, total=514
+logE: in=385, out=2, total=387
+verify: in=255, out=4, total=259
+run: in=165, out=21, total=186
+TranscribeAudioAICore: in=162, out=6, total=168
+d: in=129, out=3, total=132</div>
               </div>
             </div>
           </div>
@@ -414,14 +436,14 @@
               <tbody>
                 <tr><td>CR: Complexity & Blast Radius</td><td>Excellent</td><td>Irrelevant</td><td style="color: var(--accent-bright);">Excellent</td></tr>
                 <tr><td>CR: Coding Standards</td><td>None</td><td>Stochastic / Conflicting</td><td style="color: var(--accent-bright);">Deterministic Lints</td></tr>
-                <tr><td>CR: Spec Compliance</td><td>None</td><td>High Hallucination Risk</td><td style="color: var(--accent-bright);">Governed Spec Checks</td></tr>
+                <tr><td>CR: Spec Compliance</td><td>None</td><td>High Hallucination Risk</td><td style="color: var(--accent-bright);">Governed Spec Checks (ExampleOEM PRD Platform Primary Source)</td></tr>
                 <tr><td>RCA: Symbolication & Tracing</td><td>Excellent</td><td>None</td><td style="color: var(--accent-bright);">Excellent</td></tr>
                 <tr><td>RCA: Current Guidance</td><td>None</td><td>Retrieves 2023 deprecations</td><td style="color: var(--accent-bright);">Supersession Aware</td></tr>
                 <tr><td>RCA: Negative Knowledge</td><td>None</td><td>Rarely Documented</td><td style="color: var(--accent-bright);">Incident Postmortems</td></tr>
               </tbody>
             </table>
-            <div style="background: rgba(94, 106, 210, 0.1); padding: 16px 24px; border-top: 1px solid var(--accent); color: var(--text-primary); font-size: 16px;">
-              <strong>Bootstrap & Ownership Contract:</strong> confluence-mcp and jira-mcp can draft candidate docs via <code>akashic vault plan</code>, but domain teams must curate, verify, and commit authoritative Specs, Business Rules, Coding Standards, and ADRs into their repo Vault.
+            <div style="background: rgba(94, 106, 210, 0.1); padding: 16px 24px; border-top: 1px solid var(--accent); color: var(--text-primary); font-size: 16px; line-height: 1.45;">
+              <strong>Sources of Truth &amp; Bootstrap Contract:</strong> <strong>ExampleOEM's PRD platform</strong> is considered the most reliable source of truth for specs. Upstream sources (<strong>ExampleOEM's PRD platform</strong>, repo <code>conductor/</code> tracks, <code>confluence-mcp</code>, and <code>jira-mcp</code>) draft candidate docs via <code>akashic vault plan</code>, while domain teams verify, curate, and commit authoritative Specs, Business Rules, Coding Standards, and ADRs into their repo Vault.
             </div>
           </div>
         </div>
@@ -539,7 +561,9 @@
               </div>
             </div>
           </div>
-        </div>\n\n        <!-- Slide 8 -->
+        </div>
+
+        <!-- Slide 8 -->
         <div class="slide" id="slide-8" data-act="APPENDIX A" data-time="18:00">
           <div class="kicker">08 // APPENDIX A: CONSOLIDATED ARCHITECTURE & AGENT MCP</div>
           <div class="slide-title">Single Consolidated Rust Engine and Native Agent MCP Server</div>
@@ -584,7 +608,9 @@
               </div>
             </div>
           </div>
-        </div>\n\n<!-- Slide 9 -->
+        </div>
+
+        <!-- Slide 9 -->
         <div class="slide" id="slide-9" data-act="APPENDIX B" data-time="18:00">
           <div class="kicker">09 // APPENDIX B: SECURITY & COMPLIANCE BATTLECARD (Q4)</div>
           <div class="slide-title">Mandatory Tier-4 Sanitization Scrubs Secrets and Pseudonymizes Logcat PII</div>
@@ -670,6 +696,84 @@
           </div>
         </div>
 
+        <!-- Slide 12 -->
+        <div class="slide" id="slide-12" data-act="APPENDIX E" data-time="18:00">
+          <div class="kicker">12 // APPENDIX E: OSS CONDUCTOR COEXISTENCE &amp; ZERO-FRICTION ADOPTION (Q9)</div>
+          <div class="slide-title">Akashic Augments Repo-Level Conductor Tracks and Outer-Loop Conductor OSS</div>
+          <div class="slide-subtitle">Zero workflow disruption for projects using Gemini CLI conductor/ guidelines (e.g., SampleRadio) or distributed Conductor OSS pipelines</div>
+          <div class="split-layout">
+            <div class="card split-col col-54">
+              <div class="card-title">1. Repo-Level Gemini CLI <code>conductor/</code> Coexistence (<code>SampleRadio/conductor/</code>)</div>
+              <div class="card-text" style="font-size: 16px; margin-bottom: 12px;">
+                Teams keep <code>workflow.md</code>, TDD <code>plan.md</code> (<code>[ ] &rarr; [~] &rarr; [x]</code>), and phase checkpoint SHAs unchanged. Akashic upgrades flat track files into a governed 3-Axis substrate:
+              </div>
+              <table class="table-matrix">
+                <thead>
+                  <tr>
+                    <th>Existing <code>conductor/</code> Artifact</th>
+                    <th>Akashic Integration &amp; 3-Axis Role</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>code_styleguides/</code> &amp; <code>tech-stack.md</code></td>
+                    <td>Seeds <strong>Axis 1 (Standards)</strong> &amp; <code>akashic/&lt;app&gt;/standards/</code> via <code>vault plan</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>tracks/&lt;id&gt;/spec.md</code> &amp; <code>product.md</code></td>
+                    <td>Drives <strong>Axis 2 (Spec)</strong>; promotes to OKF v0.2 with <code>supersedes</code> DAG on checkpoint</td>
+                  </tr>
+                  <tr>
+                    <td><code>workflow.md</code> Audit &amp; Phase Gate</td>
+                    <td>Injects <strong>Axis 3 (Complexity)</strong> via <code>akashic_blast_radius</code> (0 Gradle cache impact)</td>
+                  </tr>
+                  <tr>
+                    <td><code>tracks/&lt;id&gt;/plan.md</code> &amp; <code>tracks.md</code></td>
+                    <td>Remains active developer task checklist; zero duplicate tracking required</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style="font-size: 15px; margin-top: auto; padding: 12px 16px; background: rgba(39, 166, 68, 0.1); border-radius: 8px; border-left: 4px solid var(--success); color: var(--text-primary);">
+                <strong>Why Both Together Win:</strong> <code>conductor/</code> structures active feature execution; Akashic prevents completed historical tracks from conflicting via OKF v0.2 <code>Current Guidance</code> and deterministic AST call graphs.
+              </div>
+            </div>
+            <div class="card split-col col-46">
+              <div class="card-title">2. Distributed <code>conductor-oss</code> (<code>agentspan</code>) Boundary (ADR 0008)</div>
+              <svg viewBox="0 0 740 310" width="100%" height="290" style="margin-bottom: 16px;">
+                <rect x="10" y="10" width="720" height="115" rx="10" fill="rgba(255,255,255,0.03)" stroke="var(--border)"/>
+                <text x="28" y="38" class="svg-title" style="font-size: 17px;">Outer Loop: Distributed Conductor OSS (Unattended Enterprise Sagas)</text>
+                <text x="28" y="62" style="font-size: 13.5px; fill: var(--text-muted);">Multi-service pipelines, fleet soak triggers, asynchronous HUMAN / WAIT gates</text>
+                <rect x="28" y="76" width="210" height="32" rx="6" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="133" y="97" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">DeciderService / QueueDAO</text>
+                <rect x="254" y="76" width="210" height="32" rx="6" fill="var(--bg-elevated)" stroke="var(--border)"/>
+                <text x="359" y="97" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">SystemTaskWorker Poller</text>
+                <rect x="480" y="76" width="230" height="32" rx="6" fill="rgba(94, 106, 210, 0.15)" stroke="var(--accent)"/>
+                <text x="595" y="97" text-anchor="middle" class="svg-mono" style="font-size: 12.5px; fill: var(--accent-bright);">Executes: akashic CLI</text>
+
+                <path d="M 595 125 L 595 168" stroke="var(--accent-bright)" stroke-width="2" marker-end="url(#arrow)"/>
+                <text x="578" y="152" text-anchor="end" class="svg-mono" style="font-size: 12.5px; fill: var(--accent-bright);">Stateless / Checkpointed Worker Call</text>
+
+                <rect x="10" y="175" width="720" height="120" rx="10" fill="var(--bg-elevated)" stroke="var(--success)" stroke-width="1.5"/>
+                <text x="28" y="203" class="svg-title" style="font-size: 17px; fill: var(--success);">Inner Loop: Host-Native Akashic + Repo conductor/ (Sub-ms Local)</text>
+                <text x="28" y="227" style="font-size: 13.5px; fill: var(--text-muted);">Interactive coding, 3-Axis Review, Soak Storm Deduplication, Local-Host RCA State Machine</text>
+                <rect x="28" y="243" width="210" height="34" rx="6" fill="var(--bg-surface)" stroke="var(--border)"/>
+                <text x="133" y="265" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">rmcp stdio MCP</text>
+                <rect x="254" y="243" width="210" height="34" rx="6" fill="var(--bg-surface)" stroke="var(--border)"/>
+                <text x="359" y="265" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">3x SQLite WAL (.akashic/)</text>
+                <rect x="480" y="243" width="230" height="34" rx="6" fill="var(--bg-surface)" stroke="var(--border)"/>
+                <text x="595" y="265" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">0 JVM / 0 Queue Tax</text>
+              </svg>
+              <ul class="card-text" style="padding-left: 20px; font-size: 15px; display:flex; flex-direction:column; gap: 8px;">
+                <li><strong>No Inner-Loop Polling Tax:</strong> In <code>conductor-oss</code> (<code>agentspan</code>), 1 tool turn compiles into 5+ GraalJS/Fork tasks with lock contention. Keeping interactive coding &amp; crash deduplication in local Rust preserves sub-ms speed.</li>
+                <li><strong>Drop-In Outer Worker:</strong> Distributed Conductor OSS workflows invoke the single static <code>akashic</code> binary for headless CI gates and post-merge RCA.</li>
+              </ul>
+              <div style="font-size: 15px; margin-top: auto; padding: 12px 16px; background: rgba(94, 106, 210, 0.1); border-radius: 8px; border-left: 4px solid var(--accent); color: var(--text-primary);">
+                <strong>Architectural Boundary (ADR 0008):</strong> Local host RCA &amp; active coding run at native Rust speeds; distributed Conductor OSS orchestrates long-running, multi-service lifecycle sagas.
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Bottombar -->
@@ -678,7 +782,7 @@
         <div style="flex:1; margin: 0 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; position: relative;">
           <div id="progress-bar" style="position:absolute; top:0; left:0; height:100%; width: 9%; background: var(--accent); border-radius: 2px; transition: width 0.2s;"></div>
         </div>
-        <div id="footer-progress" style="font-family: var(--font-mono); font-size: 14px; color: var(--text-secondary);">1 / 11</div>
+        <div id="footer-progress" style="font-family: var(--font-mono); font-size: 14px; color: var(--text-secondary);">1 / 12</div>
       </div>
     </div>
   </div>
@@ -696,29 +800,29 @@
     
     const demoData = {
       1: {
-        title: "Chapter 1 Highlights",
-        takeaways: "4 OEM Repositories, 810 Package Mappings, 20,231 Symbols, 91,077 AST Edges vs 52,183 Inferred Edges. Architectural God-Nodes (<code>logD</code>, <code>run</code>, <code>TranscribeAudioAICore</code>).",
-        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph discover --summary</span>\nMulti-Repo OEM Discovery (settings.gradle + AndroidManifest.xml 5-pass index):\n\n<span style="color:#00d8d6;">REPOSITORY</span>         | GERRIT PROJECT                   | PRIMARY APPLICATION ID (VAULT PARTITION)         |  <span style="color:#2ecc71;">PKGS</span> | <span style="color:#2ecc71;">SYMBOLS</span>\n--------------------------------------------------------------------------------------------------------------------------\n<span style="color:#00d8d6;">SampleRecorder</span>      | ...a/packages/apps/SampleRecorder | com.example.samplerecorder.recordingservice      |   <span style="color:#2ecc71;">180</span> |   <span style="color:#2ecc71;">9,792</span>\n<span style="color:#00d8d6;">SampleRadio</span>            | ...otorola/packages/apps/SampleRadio | com.example.radiosdktestapp                        |    <span style="color:#2ecc71;">54</span> |   <span style="color:#2ecc71;">2,434</span>\n<span style="color:#00d8d6;">SampleAssist</span>  | apps/SampleAssist           | com.example.assist                                |   <span style="color:#2ecc71;">488</span> |   <span style="color:#2ecc71;">4,857</span>\n<span style="color:#00d8d6;">SampleAudioUI</span>        | ...ola/packages/apps/SampleAudioUI | com.example.audioeffects                    |    <span style="color:#2ecc71;">88</span> |   <span style="color:#2ecc71;">3,148</span>\n==========================================================================================================================\n<span style="color:#ffbd2e;">TOTALS: 4 OEM Repositories | 810 Package Mappings | 20,231 Code Symbols</span>\nEDGE PROVENANCE: 143,260 Edges (91,077 EXTRACTED AST [calls/inherits] | 52,183 INFERRED [score >= 0.82])\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph god-nodes --repo-name SampleRecorder --top-n 5</span>\nlogD: in=2160, out=5, total=2165\nlogW: in=836, out=3, total=839\nlogI: in=513, out=1, total=514\nverify: in=255, out=4, total=259\nTranscribeAudioAICore: in=162, out=6, total=168'
+        title: "Chapter 1 Highlights (Act 1 Takeaway)",
+        takeaways: "<strong>Day-0 Multi-Repo Discovery:</strong> 4 OEM Repositories, 810 Package Mappings, 20,231 Symbols, 91,077 AST Edges vs 52,183 Inferred Edges (0 LLM calls).<br><br><strong>Architectural God-Nodes:</strong> Instant hub detection in <code>SampleRecorder</code> (<code>logD</code>, <code>verify</code>, <code>run</code>, <code>TranscribeAudioAICore</code>).",
+        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph discover --summary</span>\nMulti-Repo OEM Discovery (settings.gradle + AndroidManifest.xml 5-pass index):\n\n<span style="color:#00d8d6;">REPOSITORY</span>         | GERRIT PROJECT                   | PRIMARY APPLICATION ID (VAULT PARTITION)         |  <span style="color:#2ecc71;">PKGS</span> | <span style="color:#2ecc71;">SYMBOLS</span>\n--------------------------------------------------------------------------------------------------------------------------\n<span style="color:#00d8d6;">SampleRecorder</span>      | ...a/packages/apps/SampleRecorder | com.example.samplerecorder.recordingservice      |   <span style="color:#2ecc71;">180</span> |   <span style="color:#2ecc71;">9,792</span>\n<span style="color:#00d8d6;">SampleRadio</span>            | ...otorola/packages/apps/SampleRadio | com.example.radiosdktestapp                        |    <span style="color:#2ecc71;">54</span> |   <span style="color:#2ecc71;">2,434</span>\n<span style="color:#00d8d6;">SampleAssist</span>  | apps/SampleAssist           | com.example.assist                                |   <span style="color:#2ecc71;">488</span> |   <span style="color:#2ecc71;">4,857</span>\n<span style="color:#00d8d6;">SampleAudioUI</span>        | ...ola/packages/apps/SampleAudioUI | com.example.audioeffects                    |    <span style="color:#2ecc71;">88</span> |   <span style="color:#2ecc71;">3,148</span>\n==========================================================================================================================\n<span style="color:#ffbd2e;">TOTALS: 4 OEM Repositories | 810 Package Mappings | 20,231 Code Symbols</span>\nEDGE PROVENANCE: 143,260 Edges (91,077 EXTRACTED AST [calls/inherits] | 52,183 INFERRED [score >= 0.82])\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph god-nodes --repo-name SampleRecorder --top-n 8</span>\nlogD: in=2160, out=5, total=2165\nlogW: in=836, out=3, total=839\nlogI: in=513, out=1, total=514\nlogE: in=385, out=2, total=387\nverify: in=255, out=4, total=259\nrun: in=165, out=21, total=186\nTranscribeAudioAICore: in=162, out=6, total=168\nd: in=129, out=3, total=132'
       },
       2: {
-        title: "Chapter 2 Highlights",
-        takeaways: "Deep Transitive Closure for <code>removeUIObservers()</code>. Pre-review gate feeds 46 upstream callers, 24 downstream dependencies. Provenance breakdown (100% Extracted AST vs 0.95+ semantic similarity).",
+        title: "Chapter 2 Highlights (Act 2 Takeaway)",
+        takeaways: "<strong>Pre-Review Blast Radius:</strong> Deep transitive closure for <code>MainFragment.removeUIObservers()</code> feeds Axis 3 (Complexity) with 46 upstream callers and 24 downstream dependencies.<br><br><strong>Explicit Edge Provenance:</strong> 100% deterministic <code>EXTRACTED</code> AST calls (score 1.00) separated from <code>INFERRED</code> semantic similarity (0.95+).",
         terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph blast-radius --repo-name SampleRecorder "SampleRecorder::...::MainFragment.removeUIObservers()#0" --max-depth 2</span>\nBlast radius: <span style="color:#2ecc71;">46</span> upstream callers, <span style="color:#2ecc71;">24</span> downstream dependencies\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic graph edges --symbol "MainFragment.removeUIObservers" --provenance</span>\nTarget Symbol: MainFragment.removeUIObservers()\n\nEDGE TYPE            | PROVENANCE TIER  | SCORE  | CONNECTED TARGET SYMBOL\n------------------------------------------------------------------------------------------\nCALLS                | EXTRACTED        | 1.00   | logD\nCALLS                | EXTRACTED        | 1.00   | requireActivity\nCALLS                | EXTRACTED        | 1.00   | unregisterLargeDisplayUIObservers\nCALLS                | EXTRACTED        | 1.00   | removeRecordingObservers\nCALLS                | EXTRACTED        | 1.00   | removePermissionsObservers\nSEMANTIC_SIMILARITY  | INFERRED         | 0.96   | MainFragmentCLI.removeUIObservers()#0\nSEMANTIC_SIMILARITY  | INFERRED         | 0.95   | RecordsListFragment.removeObservers()#0\n==========================================================================================\n<span style="font-weight:bold;">Verification Axis: Complexity & Blast Radius feeds automated pre-review gate.</span>'
       },
       3: {
-        title: "Chapter 3 Highlights",
-        takeaways: "Proof of Concept Reference Scenario: Built on synthetic reference vault fixtures (prototype-akashic-rca-vault) to validate OKF v0.2 L001-L011 lint gates and forward-only supersession resolution prior to production vault rollout.",
-        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic lint --vault prototype-akashic-rca-vault/akashic/com.example.camera3 --strict</span>\n<span style="font-weight:bold;">Lint result: valid = true, issues = 0</span>\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic vault query --mode current --node-id decision-buffer-release-optimization</span>\n{\n  "mode": "current",\n  "seed_id": "decision-buffer-release-optimization",\n  "is_current": false,\n  "active_guidance_id": "decision-revert-cl-489201",\n  "supersession_chain": [\n    {\n      "predecessor": "decision-buffer-release-optimization",\n      "successor": "decision-revert-cl-489201",\n      "evidence": "../evidence/evidence-cam-9102-stack.md"\n    }\n  ]\n}\n\n<span style="color:#2ecc71; font-weight:bold;">[FORWARD SUPERSESSION RESOLVED]</span>\n  Query Seed: decision-buffer-release-optimization (is_current: false)\n  Active Guidance: decision-revert-cl-489201 (Gerrit CL 490102)\n  Supersession Chain: decision-buffer-release-optimization -> decision-revert-cl-489201'
+        title: "Chapter 3 Highlights (Act 3 Takeaway)",
+        takeaways: "<strong>Local RCA &amp; Deterministic Lint Gate:</strong> Symbolicates native crash frame to SHA-256 signature and validates OKF v0.2 L001-L011 rules (<code>valid = true, issues = 0</code>).<br><br><strong>Automated Forward Supersession:</strong> Detects stale optimization (<code>is_current: false</code>) and auto-routes agents to active revert <code>decision-revert-cl-489201</code> (Gerrit CL 490102).<br><br><span style=\"font-size: 13px; color: #ffbd2e;\">PoC Reference Scenario:</span> <span style=\"font-size: 13px; color: var(--text-muted);\">Validated against synthetic reference vault fixtures (<code>prototype-akashic-rca-vault</code>).</span>",
+        terminal: '<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic rca symbolicate --app-id com.example.camera3 --raw-log "F/DEBUG: #00 pc 0004a2b4 /vendor/lib64/hw/camera.qcom.so (CameraDeviceClient::notifyError+48)"</span>\n{\n  "crash_signature": "c455be4e...9342294",\n  "exception_or_signal": "notifyError",\n  "symbolicated_stack_trace": "notifyError: fault at top frame"\n}\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic lint --vault prototype-akashic-rca-vault/akashic/com.example.camera3 --strict</span>\n<span style="font-weight:bold;">Lint result: valid = true, issues = 0</span>\n\n<span style="color:#00d8d6;">akashic-pov</span> <span style="color:#2ecc71;">❯</span> <span style="color:#fff;">akashic vault query --mode current --node-id decision-buffer-release-optimization</span>\n{\n  "mode": "current",\n  "seed_id": "decision-buffer-release-optimization",\n  "is_current": false,\n  "active_guidance_id": "decision-revert-cl-489201",\n  "supersession_chain": [\n    {\n      "predecessor": "decision-buffer-release-optimization",\n      "successor": "decision-revert-cl-489201",\n      "evidence": "../evidence/evidence-cam-9102-stack.md"\n    }\n  ]\n}\n\n<span style="color:#2ecc71; font-weight:bold;">[FORWARD SUPERSESSION RESOLVED]</span>\n  Query Seed: decision-buffer-release-optimization (is_current: false)\n  Active Guidance: decision-revert-cl-489201 (Gerrit CL 490102)\n  Supersession Chain: decision-buffer-release-optimization -&gt; decision-revert-cl-489201'
       }
     };
 
     window.setDemoChapter = function(chapter) {
-      document.getElementById('tab-1').className = 'badge';
-      document.getElementById('tab-2').className = 'badge';
-      document.getElementById('tab-3').className = 'badge';
-      document.getElementById('tab-1').style.borderColor = 'transparent';
-      document.getElementById('tab-2').style.borderColor = 'transparent';
-      document.getElementById('tab-3').style.borderColor = 'transparent';
+      const t1 = document.getElementById('tab-1');
+      const t2 = document.getElementById('tab-2');
+      const t3 = document.getElementById('tab-3');
+      if (t1) { t1.className = 'badge'; t1.style.borderColor = 'transparent'; }
+      if (t2) { t2.className = 'badge'; t2.style.borderColor = 'transparent'; }
+      if (t3) { t3.className = 'badge'; t3.style.borderColor = 'transparent'; }
       
       const activeTab = document.getElementById('tab-' + chapter);
       if (activeTab) {
@@ -737,7 +841,16 @@
       }
     };
     
-    // Initialize chapter 1 once DOM is loaded
+    // Attach synchronous event listeners
+    const tab1 = document.getElementById('tab-1');
+    const tab2 = document.getElementById('tab-2');
+    const tab3 = document.getElementById('tab-3');
+    if (tab1) tab1.addEventListener('click', () => window.setDemoChapter(1));
+    if (tab2) tab2.addEventListener('click', () => window.setDemoChapter(2));
+    if (tab3) tab3.addEventListener('click', () => window.setDemoChapter(3));
+
+    // Initialize chapter 1 immediately and on next tick
+    window.setDemoChapter(1);
     setTimeout(() => window.setDemoChapter(1), 100);
 
 
@@ -775,6 +888,7 @@
       if (e.key >= '1' && e.key <= '9') { updateSlide(parseInt(e.key) - 1); }
       if (e.key === '0') { updateSlide(9); }
       if (e.key === '-') { updateSlide(10); }
+      if (e.key === '=' || e.key.toLowerCase() === 'e') { updateSlide(11); } // Jump to Appx E (Slide 12)
       if (e.key.toLowerCase() === 'a') { updateSlide(7); } // Jump to Appx A (Slide 8)
       if (e.key.toLowerCase() === 'f') {
         if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }

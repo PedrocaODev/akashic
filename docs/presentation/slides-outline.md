@@ -1,17 +1,28 @@
 # Akashic POV Presentation Storyboard
 
-## Slide 1: POV THESIS
-* **Timing**: 00:00 - 02:00
+## Slide 1: THE ENGINEERING CONJECTURE (PRE-AKASHIC WORKFLOW DESIGN)
+* **Timing**: 00:00 - 01:30
+* **Action Title**: Monolithic Prompts Fail: Why We Engineered 3-Axis Review and State-Aware RCA
+* **Layout Archetype**: `split-comparison`
+* **Core Data Points**:
+  1. Zero Initial Workflow Requirements: Started with a blank slate—no predefined workflow specs existed. Formulated the engineering conjecture and designed the entire workflow suite (3-Axis Code Review + State-Aware RCA) from first principles before building Akashic.
+  2. Why 3 Orthogonal Axes for Code Review: A single "review this PR" prompt conflates style, intent, and cost. Running 3 isolated parallel sub-agents—Axis 1 (Standards + Fowler smell baseline), Axis 2 (Spec Compliance), and Axis 3 (Complexity & Blast Radius)—prevents clean syntax from masking broken requirements or algorithmic regressions (`Standards pass, Spec fail`; `Spec pass, Standards fail`; `Standards & Spec pass, Complexity fail`).
+  3. Why RCA Is Impossible Without State-Aware, Curated Context: Stateless "crash log + code -> LLM" prompting collapses at OEM scale due to (a) structural & symbol blindness (stack traces show crash sites, not `addr2line`/R8 symbols or cross-repo blast radius), (b) soak storm amnesia (100s of identical monkey-test crashes loop without stateful `CrashSignature` deduplication), and (c) temporal & Negative Knowledge blindness (raw RAG retrieves obsolete 2023 docs alongside 2025 specs and lacks falsified hypotheses or reverted CL history).
+  4. The Bridge to Akashic: Defining these two workflows proved that neither the LLM nor the prompt was the bottleneck—no existing MCP or vector RAG could supply deterministic blast radius, supersession-aware specs, or Negative Knowledge.
+* **Speaker Notes**: Before we talk about Akashic, we need to explain the conjecture that forced us to build it. When I started this project, there were no requirements for the workflows themselves—I defined them and designed this suite from scratch. First, why 3-Axis Code Review? Because a monolithic prompt lets clean code style mask a missed requirement or an O(n^2) regression. Second, why State-Aware RCA? Because root cause analysis is impossible without curated context: you need symbolicated call topology, stateful soak storm deduplication, and Negative Knowledge so the agent doesn't repeat a fix that was reverted last month.
+
+## Slide 2: ENTER AKASHIC — POV THESIS
+* **Timing**: 01:30 - 03:00
 * **Action Title**: Context Retrieval Is the True Bottleneck for Enterprise AI Workflows
 * **Layout Archetype**: `split-comparison`
 * **Core Data Points**:
-  1. The Ask & The Bottleneck Found: Tasked with building 3-Axis Code Review (Standards, Spec, Complexity) and Automated RCA. The LLM is not the bottleneck; deterministic context retrieval at OEM Android scale is.
+  1. From Workflow Suite to Context Substrate: After designing 3-Axis Code Review (Standards, Spec, Complexity) and State-Aware RCA from first principles, we found that deterministic context curation at OEM Android scale is the true bottleneck.
   2. Why Off-the-Shelf Tools Fail: Python graphify invokes LLMs during indexing (costly, non-deterministic). Raw Confluence/Jira MCPs retrieve obsolete 2023 pages alongside 2025 specs with zero Scope or Supersession links.
-  3. The Solution: Akashic. A single host-native Rust binary and rmcp MCP server unifying a deterministic Code Graph, governed OKF v0.2 Vault, and checkpointed Local-Host Conductor for RCA.
+  3. The Solution: Akashic. A single host-native Rust binary and rmcp MCP server unifying a deterministic Code Graph, governed OKF v0.2 Vault, and checkpointed Two-Phase RCA State Machine.
 * **Speaker Notes**: Start strong. Acknowledge that everyone is trying to build "AI tools", but most hit a ceiling because they rely on vector search over messy, uncurated data. We found this out the hard way when building the 3-Axis code review. The fix wasn't a better prompt, it was a better context substrate.
 
-## Slide 2: ARCHITECTURE
-* **Timing**: 02:00 - 04:30
+## Slide 3: ARCHITECTURE
+* **Timing**: 03:00 - 05:00
 * **Action Title**: An 8-Crate Rust DAG and 3 Isolated SQLite Stores Eliminate Contention
 * **Layout Archetype**: `diagram-spotlight`
 * **Core Data Points**:
@@ -20,8 +31,8 @@
   3. SQLite WAL Isolation: Disposable Cache (.akashic/code_graph.db, .akashic/vault_index.db) vs Durable Checkpoint (.akashic/rca_state.db).
 * **Speaker Notes**: Why Rust? Predictability and memory footprint. We can't have an AI daemon dragging down the developer's machine. By splitting the storage into three isolated SQLite databases, we ensure that a massive indexing run never blocks a live incident RCA state update.
 
-## Slide 3: ACT 1 - DAY-0 VALUE
-* **Timing**: 04:30 - 08:00
+## Slide 4: ACT 1 - DAY-0 VALUE
+* **Timing**: 05:00 - 08:00
 * **Action Title**: Day-0 Static Discovery Indexes 20,231 Symbols Across 4 OEM Apps with Zero LLMs
 * **Layout Archetype**: `metric-callout`
 * **Core Data Points**:
@@ -31,7 +42,7 @@
   4. Bare `gix` zero-mutation callout.
 * **Speaker Notes**: Day-0 value means it works immediately upon clone. No manual tagging required. By reading bare git blobs in memory via `gix`, we extract the graph without ever touching the working tree or busting the developer's Gradle cache.
 
-## Slide 4: LIVE / RECORDED DEMO
+## Slide 5: LIVE / RECORDED DEMO
 * **Timing**: 08:00 - 10:30
 * **Action Title**: From Multi-Repo Blast Radius to Governed Vault Crystallization in Seconds
 * **Layout Archetype**: `code-walkthrough`
@@ -41,7 +52,7 @@
   3. 01:10 Vault Supersession & Lint Gate
 * **Speaker Notes**: Let's look at it in action. First, we index across boundaries. Second, we query the blast radius of a symbol change. Finally, we see how the vault catches a conflict and forces a lint gate resolution before accepting the new state.
 
-## Slide 5: ACT 2 - THE INTENT GAP
+## Slide 6: ACT 2 - THE INTENT GAP
 * **Timing**: 10:30 - 13:30
 * **Action Title**: Raw Confluence and Jira MCPs Cannot Replace Governed Repository Specs
 * **Layout Archetype**: `split-comparison`
@@ -51,7 +62,7 @@
   3. Sources of Truth & Bootstrap Contract: ExampleOEM's PRD platform is the most reliable source of truth for specs. Upstream sources (ExampleOEM's PRD platform, repo `conductor/` tracks, `confluence-mcp`, and `jira-mcp`) draft candidate nodes via `akashic vault plan`, and domain teams verify and commit authoritative specs into their repo Vault.
 * **Speaker Notes**: Code tells you what the machine is doing, but not what the business wanted. If an LLM reads Confluence directly, it might grab a deprecated 2023 design doc. For specifications, ExampleOEM's PRD platform is considered the most reliable source of truth. By seeding candidate Vault nodes from ExampleOEM's PRD platform alongside Confluence, Jira, and repo `conductor/` tracks, the Vault commits verified intent alongside the code.
 
-## Slide 6: ACT 3 - GOVERNED VAULT
+## Slide 7: ACT 3 - GOVERNED VAULT
 * **Timing**: 13:30 - 16:00
 * **Action Title**: Forward-Only Supersession Prevents Stale Decisions from Poisoning RCA
 * **Layout Archetype**: `diagram-spotlight`
@@ -61,7 +72,7 @@
   3. Forward-Only Supersession: You don't delete history, you supersede it.
 * **Speaker Notes**: When an incident happens, you need to know *why* a decision was made. If you just overwrite a Markdown file, you lose the 'why'. By using Forward-Only Supersession, Akashic maintains a cryptographic chain of custody for architectural decisions.
 
-## Slide 7: ROLLOUT & ASK
+## Slide 8: ROLLOUT & ASK
 * **Timing**: 16:00 - 18:00
 * **Action Title**: Workstation-First Adoption Scales Smoothly to Centralized Gerrit Automation
 * **Layout Archetype**: `three-pillar-grid`
@@ -71,7 +82,7 @@
   3. Asks: Platform PE vs Android PE alignment.
 * **Speaker Notes**: We are not asking for a massive DevOps cluster on Day 1. This runs locally on developer workstations today. Once proven across the triage teams, we promote the exact same binary to a Gerrit soak runner.
 
-## Slide 8: APPENDIX A (PLATFORM PE)
+## Slide 9: APPENDIX A (PLATFORM PE)
 * **Timing**: 18:00 - 30:00
 * **Action Title**: Native Rust Indexing and Four-Layer Gerrit Burst Defense
 * **Layout Archetype**: `split-comparison`
@@ -80,7 +91,7 @@
   2. 4-Layer Burst Defense: Min-Heap Sliding Debouncer, Persistent Watermark, Structural Filter, WAL Isolation.
 * **Speaker Notes**: For the Platform team: This is how we survive gerrit.example.com merge storms. We debounce, we watermark, and we filter structurally significant events before hitting the databases.
 
-## Slide 9: APPENDIX B (SECURITY & PII)
+## Slide 10: APPENDIX B (SECURITY & PII)
 * **Timing**: 18:00 - 30:00
 * **Action Title**: Mandatory Tier-4 Sanitization Scrubs Secrets and Pseudonymizes Logcat PII
 * **Layout Archetype**: `code-walkthrough`
@@ -90,7 +101,7 @@
   3. LogProfile: Format-Preserving Semantic Pseudonymization (Phone, IMEI, MAC).
 * **Speaker Notes**: Security is not a middleware, it is the lowest tier crate. Before any text hits an LLM or an embedding model, it must pass through the sanitize module. Format-preserving pseudonymization means the LLM can still trace network flows without seeing real IP or MAC addresses.
 
-## Slide 10: APPENDIX C (ANDROID PE)
+## Slide 11: APPENDIX C (ANDROID PE)
 * **Timing**: 18:00 - 30:00
 * **Action Title**: Zero-Gradle Bare Git Ingestion and Pre-LLM Soak Storm Deduplication
 * **Layout Archetype**: `diagram-spotlight`
@@ -100,7 +111,7 @@
   3. CrashSignature deduplication halts duplicate soak crashes with 0 LLM calls.
 * **Speaker Notes**: For the Android PEs: We know Gradle is slow. We don't touch it. We read directly from the .git/objects directory. When a soak storm hits, we deduplicate at the native crash signature level before ever waking up the LLM, saving thousands of API calls.
 
-## Slide 11: APPENDIX D (HALLUCINATION DEFENSE)
+## Slide 12: APPENDIX D (HALLUCINATION DEFENSE)
 * **Timing**: 18:00 - 30:00
 * **Action Title**: Four-Layer Hallucination Defense and Pragmatic Team Curation Flywheel
 * **Layout Archetype**: `three-pillar-grid`
@@ -109,7 +120,7 @@
   2. 3-Step Flywheel: Day-0 Graph -> AI-Assisted Bootstrap -> Team Sign-Off.
 * **Speaker Notes**: How do we trust it? By not letting the AI guess the architecture. The Code Graph provides explicit edges. If there is a conflict in the Vault, the system abstains and forces a human to resolve it via Lint rules. The AI is a synthesizer, not an oracle.
 
-## Slide 12: APPENDIX E (OSS CONDUCTOR INTEROPERABILITY)
+## Slide 13: APPENDIX E (OSS CONDUCTOR INTEROPERABILITY)
 * **Timing**: 18:00 - 30:00
 * **Action Title**: Akashic Augments Repo-Level Conductor Tracks and Outer-Loop Conductor OSS Workflows with Zero Friction
 * **Layout Archetype**: `split-comparison`
@@ -118,4 +129,3 @@
   2. Direct 3-Axis & Vault Mapping: `conductor/code_styleguides/` + `tech-stack.md` feed Axis 1 (Standards); `conductor/tracks/<id>/spec.md` + `product.md` feed Axis 2 (Spec Compliance) and promote to OKF v0.2 Vault nodes via `akashic vault plan` with forward-only `supersedes` lineage; `.akashic/code_graph.db` (`akashic_blast_radius`) powers Axis 3 (Complexity) during Phase 1 Audit and Phase Verification.
   3. Distributed `conductor-oss/conductor` (`agentspan`) Boundary (ADR 0008): Inner-loop interactive coding and pre-LLM crash deduplication run locally via `akashic` (`stdio` MCP + `.akashic/rca_state.db`) to avoid `DeciderService` queue polling and 5-task `agentspan` GraalJS compilation per tool turn; outer-loop `conductor-oss` enterprise sagas invoke `akashic` as a deterministic native worker task.
 * **Speaker Notes**: Several ExampleOEM projects like SampleRadio already follow the OSS Conductor guideline for agentic development. Akashic introduces zero friction: teams keep their `conductor/` directory and TDD track workflow as-is, while Akashic adds the missing AST blast radius and supersession-aware Vault governance. And for teams running distributed Conductor OSS pipelines, Akashic cleanly separates the fast local inner loop from outer-loop enterprise sagas.
-

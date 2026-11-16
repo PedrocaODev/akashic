@@ -171,21 +171,22 @@
       <div class="stage-topbar">
         <div class="topbar-brand">AKASHIC // POV</div>
         <div class="topbar-controls">
-          <span class="badge accent" id="header-act-badge">POV THESIS</span>
+          <span class="badge accent" id="header-act-badge">THE CONJECTURE</span>
           <span class="badge" id="header-time-badge">00:00</span>
           <select id="slide-selector">
-            <option value="1">1. Thesis</option>
-            <option value="2">2. Architecture</option>
-            <option value="3">3. Day-0 Value</option>
-            <option value="4">4. Live Demo</option>
-            <option value="5">5. The Intent Gap</option>
-            <option value="6">6. Governed Vault</option>
-            <option value="7">7. Rollout</option>
-            <option value="8">8. Appx A: Platform</option>
-            <option value="9">9. Appx B: Security</option>
-            <option value="10">10. Appx C: Android</option>
-            <option value="11">11. Appx D: Defense</option>
-            <option value="12">12. Appx E: Conductor</option>
+            <option value="1">1. The Conjecture</option>
+            <option value="2">2. Enter Akashic</option>
+            <option value="3">3. Architecture</option>
+            <option value="4">4. Day-0 Value</option>
+            <option value="5">5. Live Demo</option>
+            <option value="6">6. The Intent Gap</option>
+            <option value="7">7. Governed Vault</option>
+            <option value="8">8. Rollout</option>
+            <option value="9">9. Appx A: Platform</option>
+            <option value="10">10. Appx B: Security</option>
+            <option value="11">11. Appx C: Android</option>
+            <option value="12">12. Appx D: Defense</option>
+            <option value="13">13. Appx E: Conductor</option>
           </select>
           <span style="color:var(--text-muted); font-size:14px; font-family:var(--font-mono);">Overview [O] Notes [N] Fullscreen [F]</span>
         </div>
@@ -195,15 +196,97 @@
       <div id="slides-container">
 
         <!-- Slide 1 -->
-        <div class="slide active" id="slide-1" data-act="POV THESIS" data-time="00:00">
-          <div class="kicker">01 // POV THESIS & EXECUTIVE SUMMARY</div>
+        <div class="slide active" id="slide-1" data-act="THE CONJECTURE" data-time="00:00">
+          <div class="kicker">01 // THE ENGINEERING CONJECTURE: FIRST-PRINCIPLES WORKFLOW DESIGN</div>
+          <div class="slide-title">Monolithic Prompts Fail: Why We Engineered 3-Axis Review and State-Aware RCA</div>
+          <div class="slide-subtitle">Started with zero predefined workflow requirements—formulated the workflow suite from first principles before building Akashic</div>
+          <div class="split-col">
+            <div class="split-layout">
+              <div class="card split-col col-50" style="gap: 12px; padding: 20px 24px;">
+                <div class="card-title" style="margin-bottom: 2px;">1. Why Code Review Must Be 3 Orthogonal Axes</div>
+                <div class="card-text" style="font-size: 15.5px;">
+                  A single-pass <em>"review this PR"</em> prompt conflates syntax, product intent, and runtime cost. We designed <strong>3 isolated, parallel sub-agent axes</strong> so one axis can never mask another:
+                </div>
+                <table class="table-matrix">
+                  <thead>
+                    <tr>
+                      <th>Orthogonal Axis</th>
+                      <th>Verification Target</th>
+                      <th>Failure Mode Caught</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Axis 1: Standards</strong></td>
+                      <td>Repo conventions + Fowler code-smell baseline</td>
+                      <td><em>Spec pass, Standards fail</em> (works, breaks repo design)</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Axis 2: Spec Compliance</strong></td>
+                      <td>Diff vs. authoritative spec (missing items / scope creep)</td>
+                      <td><em>Standards pass, Spec fail</em> (clean code, wrong feature)</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Axis 3: Complexity</strong></td>
+                      <td>Before/after time &amp; space Big-O + caller/callee blast radius</td>
+                      <td><em>Standards &amp; Spec pass, Complexity fail</em> (O(n²) / IPC regression)</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style="font-size: 14.5px; margin-top: auto; padding: 10px 14px; background: rgba(94, 106, 210, 0.1); border-radius: 8px; border-left: 4px solid var(--accent); color: var(--text-primary);">
+                  <strong>Non-Masking Invariant:</strong> Sub-agents run in parallel without shared context pollution and never re-rank or suppress findings across axes.
+                </div>
+              </div>
+              <div class="card split-col col-50" style="gap: 12px; padding: 20px 24px;">
+                <div class="card-title" style="margin-bottom: 2px;">2. Why Autonomous RCA Is Impossible Without Curated Context</div>
+                <div class="card-text" style="font-size: 15.5px;">
+                  Stateless <em>"crash log + code &rarr; LLM"</em> prompting collapses at OEM Android scale. Root cause analysis is a <strong>state-aware elimination process</strong> that fails without three curated inputs:
+                </div>
+                <table class="table-matrix">
+                  <thead>
+                    <tr>
+                      <th>RCA Requirement</th>
+                      <th>Why Stateless / Uncurated Context Fails</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Symbolicated Call Topology</strong></td>
+                      <td>Raw stack traces show the crash frame (often a framework/HAL callback), not unstripped symbols (<code>addr2line</code>/R8), upstream callers, or cross-repo blast radius.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Stateful Soak Deduplication</strong></td>
+                      <td>One regression in monkey soak testing triggers 100s of identical BugReport dumps; without durable <code>CrashSignature</code> state, agents re-investigate duplicates in a loop.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Curated Guidance &amp; Negative Knowledge</strong></td>
+                      <td>Raw vector RAG blends deprecated 2023 wiki pages with 2025 specs and lacks <strong>Negative Knowledge</strong> (falsified hypotheses &amp; reverted CLs)—repeating failed fixes.</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style="font-size: 14.5px; margin-top: auto; padding: 10px 14px; background: rgba(229, 72, 77, 0.1); border-radius: 8px; border-left: 4px solid var(--danger); color: var(--text-primary);">
+                  <strong>The Curated Context Imperative:</strong> An LLM cannot guess which of 3 conflicting wiki pages is active or which workaround was reverted last week.
+                </div>
+              </div>
+            </div>
+            <div class="card" style="flex: 0 0 auto; padding: 16px 24px; border-color: var(--success); background: rgba(39, 166, 68, 0.08);">
+              <div class="card-text" style="font-size: 16.5px; color: var(--text-primary);">
+                <strong style="color: var(--success);">The Conjecture That Birthed Akashic:</strong> Defining <strong>3-Axis Code Review</strong> and <strong>State-Aware RCA</strong> from scratch revealed that off-the-shelf MCPs and vector RAG cannot feed them. Before autonomous agents can review or debug OEM codebases, a deterministic substrate must provide AST blast radius, supersession-aware specs, and Negative Knowledge.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 2 -->
+        <div class="slide" id="slide-2" data-act="POV THESIS" data-time="01:30">
+          <div class="kicker">02 // ENTER AKASHIC: POV THESIS & EXECUTIVE SUMMARY</div>
           <div class="slide-title">Context Retrieval Is the True Bottleneck for Enterprise AI Workflows</div>
           <div class="slide-subtitle">Why 3-Axis Code Review and Automated RCA require a unified Rust Code Graph and Governed Vault</div>
           <div class="split-layout">
             <div class="split-col col-40">
               <div class="card">
-                <div class="card-title">The Ask & The Bottleneck Found</div>
-                <div class="card-text">Tasked with building <strong>3-Axis Code Review</strong> (Standards, Spec, Complexity) and <strong>Automated RCA</strong>. Neither the LLM nor the prompt is the bottleneck; deterministic context retrieval at OEM Android scale is.</div>
+                <div class="card-title">From Workflow Design to Context Bottleneck</div>
+                <div class="card-text">After designing our <strong>3-Axis Code Review</strong> (Standards, Spec, Complexity) and <strong>State-Aware RCA</strong> suite from first principles, testing proved that neither the LLM nor the prompt is the bottleneck; deterministic context retrieval at OEM Android scale is.</div>
               </div>
               <div class="card">
                 <div class="card-title">Why Off-the-Shelf Tools Fail</div>
@@ -211,14 +294,14 @@
               </div>
               <div class="card" style="border-color: var(--accent);">
                 <div class="card-title" style="color: var(--accent-bright);">The Solution: Akashic</div>
-                <div class="card-text">Single host-native Rust binary and rmcp MCP server unifying a deterministic <strong>Code Graph</strong>, a governed OKF v0.2 Markdown <strong>Vault</strong>, and a checkpointed <strong>Local-Host Conductor</strong> for RCA.</div>
+                <div class="card-text">Single host-native Rust binary and rmcp MCP server unifying a deterministic <strong>Code Graph</strong>, a governed OKF v0.2 Markdown <strong>Vault</strong>, and a checkpointed <strong>Two-Phase RCA State Machine</strong>.</div>
               </div>
             </div>
             <div class="split-col col-60">
               <svg viewBox="0 0 760 660" width="100%" height="100%">
                 <rect x="20" y="40" width="720" height="150" rx="12" fill="rgba(255,255,255,0.03)" stroke="var(--border)"/>
                 <text x="50" y="80" class="svg-title">Layer 1: Autonomous AI Workflows</text>
-                <text x="50" y="110">3-Axis Code Review + Automated RCA</text>
+                <text x="50" y="110">3-Axis Code Review + State-Aware RCA</text>
                 
                 <rect x="20" y="240" width="720" height="180" rx="12" fill="var(--bg-card)" stroke="var(--accent-bright)" stroke-width="2"/>
                 <text x="50" y="280" class="svg-title" fill="var(--accent-bright)">Layer 2: Akashic Context & Governance Substrate</text>
@@ -249,9 +332,9 @@
           </div>
         </div>
 
-        <!-- Slide 2 -->
-        <div class="slide" id="slide-2" data-act="ARCHITECTURE" data-time="02:00">
-          <div class="kicker">02 // UNIFIED RUST WORKSPACE & STORAGE ISOLATION</div>
+        <!-- Slide 3 -->
+        <div class="slide" id="slide-3" data-act="ARCHITECTURE" data-time="03:00">
+          <div class="kicker">03 // UNIFIED RUST WORKSPACE & STORAGE ISOLATION</div>
           <div class="slide-title">An 8-Crate Rust DAG and 3 Isolated SQLite Stores Eliminate Contention</div>
           <div class="slide-subtitle">Strict compile-time layering and physical WAL separation between disposable indexes and durable RCA state</div>
           <div class="split-layout">
@@ -313,9 +396,9 @@
           </div>
         </div>
 
-        <!-- Slide 3 -->
-        <div class="slide" id="slide-3" data-act="ACT 1" data-time="04:30">
-          <div class="kicker">03 // ACT 1: EMPIRICAL DAY-0 MULTI-REPO DISCOVERY</div>
+        <!-- Slide 4 -->
+        <div class="slide" id="slide-4" data-act="ACT 1" data-time="05:00">
+          <div class="kicker">04 // ACT 1: EMPIRICAL DAY-0 MULTI-REPO DISCOVERY</div>
           <div class="slide-title">Day-0 Static Discovery Indexes 20,231 Symbols with Zero LLMs</div>
           <div class="slide-subtitle">Non-destructive bare-Git ingestion via gix and 5-pass Android package discovery work out of the box</div>
           <div class="grid-4" style="margin-bottom: 40px;">
@@ -360,9 +443,9 @@
           </div>
         </div>
 
-        <!-- Slide 4 -->
-        <div class="slide" id="slide-4" data-act="LIVE DEMO" data-time="08:00">
-          <div class="kicker">04 // TWO-MINUTE LIVE / RECORDED TERMINAL WALKTHROUGH</div>
+        <!-- Slide 5 -->
+        <div class="slide" id="slide-5" data-act="LIVE DEMO" data-time="08:00">
+          <div class="kicker">05 // TWO-MINUTE LIVE / RECORDED TERMINAL WALKTHROUGH</div>
           <div class="slide-title">From Multi-Repo Blast Radius to Governed Vault Crystallization in Seconds</div>
           <div class="slide-subtitle">Interactive chapter replay of live CLI and rmcp MCP execution across ExampleOEM OEM repositories</div>
           <div class="split-layout">
@@ -418,9 +501,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 5 -->
-        <div class="slide" id="slide-5" data-act="THE INTENT GAP" data-time="10:30">
-          <div class="kicker">05 // ACT 2: WHY RAW RAG AND CODE STRUCTURE ALONE PLATEAU</div>
+        <!-- Slide 6 -->
+        <div class="slide" id="slide-6" data-act="THE INTENT GAP" data-time="10:30">
+          <div class="kicker">06 // ACT 2: WHY RAW RAG AND CODE STRUCTURE ALONE PLATEAU</div>
           <div class="slide-title">Raw Confluence and Jira MCPs Cannot Replace Governed Repository Specs</div>
           <div class="slide-subtitle">Code structure reveals what the code is, but verifying intent requires versioned, conflict-free rules</div>
           <div class="card" style="flex: 1; padding: 0; overflow: hidden; display: flex; flex-direction: column;">
@@ -448,9 +531,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 6 -->
-        <div class="slide" id="slide-6" data-act="GOVERNED VAULT" data-time="13:30">
-          <div class="kicker">06 // ACT 3: GOVERNED OKF V0.2 VAULT & CRYSTALLIZATION</div>
+        <!-- Slide 7 -->
+        <div class="slide" id="slide-7" data-act="GOVERNED VAULT" data-time="13:30">
+          <div class="kicker">07 // ACT 3: GOVERNED OKF V0.2 VAULT & CRYSTALLIZATION</div>
           <div class="badge" style="background: rgba(255, 189, 46, 0.15); color: #ffbd2e; border: 1px solid rgba(255, 189, 46, 0.4); margin-bottom: 8px; align-self: flex-start; display: inline-block;">SYNTHETIC REFERENCE ARCHITECTURE // PoC SCENARIO</div>
           <div class="slide-title">Forward-Only Supersession Prevents Stale Decisions from Poisoning RCA</div>
           <div class="slide-subtitle">Illustrative reference architecture in prototype-akashic-rca-vault demonstrating forward-only supersession and deterministic L001-L011 linting before production bootstrap.</div>
@@ -526,9 +609,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-                <!-- Slide 7 -->
-        <div class="slide" id="slide-7" data-act="ROLLOUT" data-time="16:00">
-          <div class="kicker">07 // OPERATIONAL EVALUATION & TECHNICAL HAND-OFF</div>
+                <!-- Slide 8 -->
+        <div class="slide" id="slide-8" data-act="ROLLOUT" data-time="16:00">
+          <div class="kicker">08 // OPERATIONAL EVALUATION & TECHNICAL HAND-OFF</div>
           <div class="slide-title">Technical Validation and Operational Deployment Model</div>
           <div class="slide-subtitle">Engineering evaluation across local developer workstations and centralized Gerrit stream automation</div>
           <div class="split-col">
@@ -563,9 +646,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 8 -->
-        <div class="slide" id="slide-8" data-act="APPENDIX A" data-time="18:00">
-          <div class="kicker">08 // APPENDIX A: CONSOLIDATED ARCHITECTURE & AGENT MCP</div>
+        <!-- Slide 9 -->
+        <div class="slide" id="slide-9" data-act="APPENDIX A" data-time="18:00">
+          <div class="kicker">09 // APPENDIX A: CONSOLIDATED ARCHITECTURE & AGENT MCP</div>
           <div class="slide-title">Single Consolidated Rust Engine and Native Agent MCP Server</div>
           <div class="slide-subtitle">Consolidating exploratory code-review and RCA research into a unified binary with native stdio JSON-RPC agent tools</div>
           <div class="split-layout">
@@ -610,9 +693,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 9 -->
-        <div class="slide" id="slide-9" data-act="APPENDIX B" data-time="18:00">
-          <div class="kicker">09 // APPENDIX B: SECURITY & COMPLIANCE BATTLECARD (Q4)</div>
+        <!-- Slide 10 -->
+        <div class="slide" id="slide-10" data-act="APPENDIX B" data-time="18:00">
+          <div class="kicker">10 // APPENDIX B: SECURITY & COMPLIANCE BATTLECARD (Q4)</div>
           <div class="slide-title">Mandatory Tier-4 Sanitization Scrubs Secrets and Pseudonymizes Logcat PII</div>
           <div class="slide-subtitle">akashic-sanitize sits at the bottom of the crate DAG so no engine, vault, or RCA path can bypass it</div>
           <div class="card" style="margin-bottom: 24px; padding: 16px 24px; background: rgba(39, 166, 68, 0.1); border-color: var(--success);">
@@ -635,9 +718,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 10 -->
-        <div class="slide" id="slide-10" data-act="APPENDIX C" data-time="18:00">
-          <div class="kicker">10 // APPENDIX C: ANDROID PE BATTLECARD (Q5, Q6 & Q7)</div>
+        <!-- Slide 11 -->
+        <div class="slide" id="slide-11" data-act="APPENDIX C" data-time="18:00">
+          <div class="kicker">11 // APPENDIX C: ANDROID PE BATTLECARD (Q5, Q6 & Q7)</div>
           <div class="slide-title">Zero-Gradle Bare Git Ingestion and Pre-LLM Soak Storm Deduplication</div>
           <div class="slide-subtitle">Multi-module flavor discovery, incremental build cache safety, and 2GB NVMe LRU symbolication</div>
           <div class="split-layout">
@@ -659,15 +742,15 @@ d: in=129, out=3, total=132</div>
                 <li><strong>Stage 3:</strong> 2GB NVMe Symbol Store LRU Cache + addr2line / R8 retrace</li>
                 <li><strong style="color:var(--accent-bright);">Stage 4:</strong> <code>CrashSignature = sha256(app_id + exception + top_3_frames)</code></li>
                 <li><strong>Stage 5:</strong> If Signature Exists -&gt; Append Count and Halt (0 LLM Calls)</li>
-                <li><strong>Stage 6:</strong> If New -&gt; Forward to RCA Conductor</li>
+                <li><strong>Stage 6:</strong> If New -&gt; Assemble Investigation Context Packet (Two-Phase RCA State Machine)</li>
               </ul>
             </div>
           </div>
         </div>
 
-        <!-- Slide 11 -->
-        <div class="slide" id="slide-11" data-act="APPENDIX D" data-time="18:00">
-          <div class="kicker">11 // APPENDIX D: HALLUCINATION DEFENSE & CURATION ROI (Q2 & Q8)</div>
+        <!-- Slide 12 -->
+        <div class="slide" id="slide-12" data-act="APPENDIX D" data-time="18:00">
+          <div class="kicker">12 // APPENDIX D: HALLUCINATION DEFENSE & CURATION ROI (Q2 & Q8)</div>
           <div class="slide-title">Four-Layer Hallucination Defense and Pragmatic Team Curation Flywheel</div>
           <div class="slide-subtitle">Combining explicit Edge Provenance, temporal supersession, conflict abstention, and adversarial falsification</div>
           <div class="split-layout">
@@ -696,9 +779,9 @@ d: in=129, out=3, total=132</div>
           </div>
         </div>
 
-        <!-- Slide 12 -->
-        <div class="slide" id="slide-12" data-act="APPENDIX E" data-time="18:00">
-          <div class="kicker">12 // APPENDIX E: OSS CONDUCTOR COEXISTENCE &amp; ZERO-FRICTION ADOPTION (Q9)</div>
+        <!-- Slide 13 -->
+        <div class="slide" id="slide-13" data-act="APPENDIX E" data-time="18:00">
+          <div class="kicker">13 // APPENDIX E: OSS CONDUCTOR COEXISTENCE &amp; ZERO-FRICTION ADOPTION (Q9)</div>
           <div class="slide-title">Akashic Augments Repo-Level Conductor Tracks and Outer-Loop Conductor OSS</div>
           <div class="slide-subtitle">Zero workflow disruption for projects using Gemini CLI conductor/ guidelines (e.g., SampleRadio) or distributed Conductor OSS pipelines</div>
           <div class="split-layout">
@@ -721,7 +804,7 @@ d: in=129, out=3, total=132</div>
                   </tr>
                   <tr>
                     <td><code>tracks/&lt;id&gt;/spec.md</code> &amp; <code>product.md</code></td>
-                    <td>Drives <strong>Axis 2 (Spec)</strong>; promotes to OKF v0.2 with <code>supersedes</code> DAG on checkpoint</td>
+                    <td>Drivers <strong>Axis 2 (Spec)</strong>; promotes to OKF v0.2 with <code>supersedes</code> DAG on checkpoint</td>
                   </tr>
                   <tr>
                     <td><code>workflow.md</code> Audit &amp; Phase Gate</td>
@@ -755,7 +838,7 @@ d: in=129, out=3, total=132</div>
 
                 <rect x="10" y="175" width="720" height="120" rx="10" fill="var(--bg-elevated)" stroke="var(--success)" stroke-width="1.5"/>
                 <text x="28" y="203" class="svg-title" style="font-size: 17px; fill: var(--success);">Inner Loop: Host-Native Akashic + Repo conductor/ (Sub-ms Local)</text>
-                <text x="28" y="227" style="font-size: 13.5px; fill: var(--text-muted);">Interactive coding, 3-Axis Review, Soak Storm Deduplication, Local-Host RCA State Machine</text>
+                <text x="28" y="227" style="font-size: 13.5px; fill: var(--text-muted);">Interactive coding, 3-Axis Review, Soak Storm Deduplication, Two-Phase RCA State Machine</text>
                 <rect x="28" y="243" width="210" height="34" rx="6" fill="var(--bg-surface)" stroke="var(--border)"/>
                 <text x="133" y="265" text-anchor="middle" class="svg-mono" style="font-size: 12.5px;">rmcp stdio MCP</text>
                 <rect x="254" y="243" width="210" height="34" rx="6" fill="var(--bg-surface)" stroke="var(--border)"/>
@@ -782,7 +865,7 @@ d: in=129, out=3, total=132</div>
         <div style="flex:1; margin: 0 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; position: relative;">
           <div id="progress-bar" style="position:absolute; top:0; left:0; height:100%; width: 9%; background: var(--accent); border-radius: 2px; transition: width 0.2s;"></div>
         </div>
-        <div id="footer-progress" style="font-family: var(--font-mono); font-size: 14px; color: var(--text-secondary);">1 / 12</div>
+        <div id="footer-progress" style="font-family: var(--font-mono); font-size: 14px; color: var(--text-secondary);">1 / 13</div>
       </div>
     </div>
   </div>
@@ -881,15 +964,16 @@ d: in=129, out=3, total=132</div>
     document.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight' || e.key === ' ') { updateSlide(currentSlide + 1); }
       if (e.key === 'ArrowLeft') { updateSlide(currentSlide - 1); }
-      if (e.key >= '1' && e.key <= '3' && slides[currentSlide].id === 'slide-4') {
+      if (e.key >= '1' && e.key <= '3' && slides[currentSlide].id === 'slide-5') {
         window.setDemoChapter(parseInt(e.key));
         return;
       }
-      if (e.key >= '1' && e.key <= '9') { updateSlide(parseInt(e.key) - 1); }
-      if (e.key === '0') { updateSlide(9); }
-      if (e.key === '-') { updateSlide(10); }
-      if (e.key === '=' || e.key.toLowerCase() === 'e') { updateSlide(11); } // Jump to Appx E (Slide 12)
-      if (e.key.toLowerCase() === 'a') { updateSlide(7); } // Jump to Appx A (Slide 8)
+      if (e.key >= '1' && e.key <= '8') { updateSlide(parseInt(e.key) - 1); }
+      if (e.key === '9' || e.key.toLowerCase() === 'a') { updateSlide(8); } // Jump to Appx A (Slide 9)
+      if (e.key === '0' || e.key.toLowerCase() === 'b') { updateSlide(9); } // Jump to Appx B (Slide 10)
+      if (e.key === '-' || e.key.toLowerCase() === 'c') { updateSlide(10); } // Jump to Appx C (Slide 11)
+      if (e.key === '=' || e.key.toLowerCase() === 'd') { updateSlide(11); } // Jump to Appx D (Slide 12)
+      if (e.key.toLowerCase() === 'e') { updateSlide(12); } // Jump to Appx E (Slide 13)
       if (e.key.toLowerCase() === 'f') {
         if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }
         else { document.exitFullscreen(); }

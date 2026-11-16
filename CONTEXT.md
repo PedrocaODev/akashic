@@ -178,9 +178,9 @@ _Avoid_: De-duper, storm blocker, rate limiter
 A local caching layer mapping build fingerprints to unstripped ELF binaries and R8/ProGuard mapping files for Symbolication.
 _Avoid_: Symbol buffer, cache folder, binary store
 
-**Local-Host Conductor**:
-The host-native RCA workflow state machine that executes the multi-stage Investigation pipeline using durable SQLite state checkpointing.
-_Avoid_: Cloud Conductor, Orkes server, containerized orchestrator
+**Two-Phase RCA State Machine**:
+The deterministic, host-native RCA workflow state machine that executes the two-phase Investigation pipeline (Phase A context packet assembly and Phase B curation gate and crystallization) using durable SQLite state checkpointing.
+_Avoid_: RCA Conductor, Local-Host Conductor, Cloud Conductor, Orkes server, containerized orchestrator
 
 ### Sanitization
 
